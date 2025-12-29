@@ -175,7 +175,7 @@ def extract_criteria_from_text(query: str) -> dict:
     user = f"Query: {query}"
 
     resp = openai_client.chat.completions.create(
-        model="gpt-4o-mini",
+        model="gpt-5.1",
         messages=[
             {"role": "system", "content": system},
             {"role": "user", "content": user},
