@@ -267,7 +267,7 @@ def answer_in_english(criteria, results):
         "<pokemon_name>-'galar' -> Galarian <pokemon_name> "
         "<pokemon_name>-'paldea' -> Paldean <pokemon_name> "
         "<pokemon_name>-'hisui' -> Hisuian <pokemon_name> "
-        "Only if the pokemon is not a mega or regional form but still has hyphens in it's name, then there is irrelevant information about its form after the hyphen. We can exclude information about it's form. If this causes the name to be a duplicate, then only use one of those "
+        "Only if the pokemon is not a mega or regional form but still has hyphens in its name, then there is irrelevant information about its form after the hyphen. We can exclude information about its form. If this causes the name to be a duplicate, then only use one of those "
         "It's very important that you format the names in that way. Double check there are no hyphens and regions come before species name, but do not add regional/mega information that wasn't in the name of the pokemon already "
         "Return one sentence only"
     )
