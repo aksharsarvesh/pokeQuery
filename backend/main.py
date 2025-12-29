@@ -12,10 +12,15 @@ from supabase import create_client
 
 app = FastAPI()
 
-# Allow Next.js dev server to call the API directly.
+# Allow local dev plus any configured production frontend origin.
+frontend_origin = os.getenv("FRONTEND_ORIGIN")
+allowed_origins = ["http://localhost:3000"]
+if frontend_origin:
+    allowed_origins.append(frontend_origin)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
