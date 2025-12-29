@@ -170,8 +170,8 @@ def extract_criteria_from_text(query: str) -> dict:
         "You extract search criteria for Pokemon. Return only JSON with keys "
         '"types", "moves", "abilities", "exclude_types", "exclude_moves", '
         '"exclude_abilities". Values must be arrays of lowercase strings. '
-        "Only include items explicitly requested. Do not add extra keys."
-    )
+        "Only include items explicitly requested. Do not add extra keys. "
+        "Sometimes the user will have typos in their query. For example, missing a space in a two-word move or ability. Use your best judgement to try and figure out what they meant in these cases. You are free to fix these typos")
     user = f"Query: {query}"
 
     resp = openai_client.chat.completions.create(
@@ -293,10 +293,13 @@ def search_from_text(payload: TextQueryRequest):
 
     try:
         criteria = extract_criteria_from_text(query)
+        print(criteria)
         plan = build_plan_from_criteria(criteria)
+        print(plan)
         rows = execute_supabase_plan(db, plan)
     except (ValueError, RuntimeError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     results = [row.get("name") for row in rows]
+    print(results)
     answer = answer_in_english(criteria, results)
     return answer
