@@ -3,10 +3,12 @@ import os
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from google import genai
+from google.genai import types
+
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from openai import OpenAI
 from pydantic import BaseModel
 from supabase import create_client
 
@@ -26,6 +28,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+class PokemonSearch(BaseModel):
+    types: list[str]
+    moves: list[str]
+    abilities: list[str]
+    exclude_types: list[str]
+    exclude_moves: list[str]
+    exclude_abilities: list[str]
 
 def require_env(name: str) -> str:
     value = os.getenv(name)
@@ -33,12 +42,13 @@ def require_env(name: str) -> str:
         raise ValueError(f"Missing required environment variable: {name}")
     return value
 
-
 load_dotenv()
+
 supabase_url = require_env("SUPABASE_URL")
 supabase_key = require_env("SUPABASE_KEY")
 db = create_client(supabase_url, supabase_key)
-openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+gemini_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 AllowedOp = Literal[
     "eq",
@@ -162,37 +172,42 @@ def _normalize_list(value: Any, max_items: int) -> list[str]:
     return out
 
 
+# --- CHANGED: Refactored to use Gemini Native Structured Outputs ---
 def extract_criteria_from_text(query: str) -> dict:
-    if not openai_client.api_key:
-        raise ValueError("Missing OPENAI_API_KEY")
+    if not os.getenv("GEMINI_API_KEY"):
+        raise ValueError("Missing GEMINI_API_KEY")
 
     system = (
-        "You extract search criteria for Pokemon. Return only JSON with keys "
-        '"types", "moves", "abilities", "exclude_types", "exclude_moves", '
-        '"exclude_abilities". Values must be arrays of lowercase strings. '
+        "You extract search criteria for Pokemon. Return only JSON. "
+        "Values must be arrays of lowercase strings. "
         "Only include items explicitly requested. Do not add extra keys. "
         "Sometimes the user will have typos in their query. For example, missing a space in a two-word move or ability. Use your best judgement to try and figure out what they meant in these cases. You are free to fix these typos")
-    user = f"Query: {query}"
 
-    resp = openai_client.chat.completions.create(
-        model="gpt-5.1",
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-        response_format={"type": "json_object"},
+    # Native Gemini Call with Pydantic enforcement
+    resp = gemini_client.models.generate_content(
+        model="models/gemini-2.5-flash", # Use 2.0 Flash
+        contents=f"Query: {query}",
+        config=types.GenerateContentConfig(
+            system_instruction=system,
+            response_mime_type="application/json",
+            response_schema=PokemonSearch, # Passes your existing Pydantic model directly
+        ),
     )
-    content = resp.choices[0].message.content or "{}"
-    data = json.loads(content)
     
-    types = _normalize_list(data.get("types", []), MAX_TYPES)
-    moves = _normalize_list(data.get("moves", []), MAX_MOVES)
-    abilities = _normalize_list(data.get("abilities", []), MAX_ABILITIES)
-    exclude_types = _normalize_list(data.get("exclude_types", []), MAX_TYPES)
-    exclude_moves = _normalize_list(data.get("exclude_moves", []), MAX_MOVES)
-    exclude_abilities = _normalize_list(data.get("exclude_abilities", []), MAX_ABILITIES)
+    # Access the parsed object directly
+    data = resp.parsed 
+
+    # .parsed returns the Pydantic object, so we access attributes directly or convert to dict
+    # We'll use getattr to be safe and match your existing logic style
+    types_list = _normalize_list(getattr(data, "types", []), MAX_TYPES)
+    moves = _normalize_list(getattr(data, "moves", []), MAX_MOVES)
+    abilities = _normalize_list(getattr(data, "abilities", []), MAX_ABILITIES)
+    exclude_types = _normalize_list(getattr(data, "exclude_types", []), MAX_TYPES)
+    exclude_moves = _normalize_list(getattr(data, "exclude_moves", []), MAX_MOVES)
+    exclude_abilities = _normalize_list(getattr(data, "exclude_abilities", []), MAX_ABILITIES)
+
     return {
-        "types": types,
+        "types": types_list,
         "moves": moves,
         "abilities": abilities,
         "exclude_types": exclude_types,
@@ -248,9 +263,10 @@ def search(plan: dict):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"results": [row.get("name") for row in rows]}
 
+# --- CHANGED: Refactored to use standard Gemini generation ---
 def answer_in_english(criteria, results):
-    if not openai_client.api_key:
-        raise ValueError("Missing OPENAI_API_KEY")
+    if not os.getenv("GEMINI_API_KEY"):
+        raise ValueError("Missing GEMINI_API_KEY")
 
     system = (
         "You are given a list of pokemon names along with criteria that they all fulfill "
@@ -273,15 +289,15 @@ def answer_in_english(criteria, results):
     )
     user = f"Criteria: {criteria}, Results: {results}"
     
-    resp = openai_client.chat.completions.create(
-        model="gpt-4.1",
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-        
+    resp = gemini_client.models.generate_content(
+        model="models/gemini-2.5-flash",
+        contents=user,
+        config=types.GenerateContentConfig(
+            system_instruction=system
+        )
     )
-    return resp.choices[0].message.content or ""
+    return resp.text or ""
+
 class TextQueryRequest(BaseModel):
     query: str
 
