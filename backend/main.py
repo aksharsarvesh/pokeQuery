@@ -177,13 +177,14 @@ def extract_criteria_from_text(query: str) -> dict:
         "You extract search criteria for Pokemon and return only JSON. "
         "Return only JSON with keys "
         '"types", "moves", "abilities", "exclude_types", "exclude_moves", '
-        '"exclude_abilities". Values must be arrays of lowercase strings. '
+        '"exclude_abilities", "notes". Values must be arrays of lowercase strings. '
         "Do not add any keys outside that schema. "
         "Only include items explicitly requested by the user. "
         "Correct spelling and spacing to canonical move/ability/type names. "
         "Do not copy the terms directly. Confirm each is a real type/move/ability and is spelled and spaced correctly. "
         "If a user token appears to be concatenated, split it into the intended multi-word term. "
         "If truly ambiguous, omit that token instead of guessing. "
+        "Also in the notes attribute write down any editing you had to make to the query, how and why."
     )
     user = f"Query: {query}"
 
