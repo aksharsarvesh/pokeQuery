@@ -273,7 +273,7 @@ def answer_in_english(criteria, results):
         "For example, '<type> pokemon that know <move_1> and <move_2> and have <ability> are <pokemon_1>, <pokemon_2>, and <pokemon_3>"
         "Capitalize the criteria. "
         "Finally, some pokemon have special names with hyphens. The following are rules to handle these "
-        "If the pokemon is a mega pokemon, call it 'mega <pokemon_name' i.e. "
+        "If the pokemon is a mega pokemon, call it 'mega <pokemon_name>' i.e. "
         "<pokemon_name>-'mega' -> Mega <pokemon_name> "
         "<pokemon_name>-'mega-x' -> Mega <pokemon_name> X"
         "<pokemon_name>-'mega-y' -> Mega <pokemon_name> Y"
@@ -282,7 +282,7 @@ def answer_in_english(criteria, results):
         "<pokemon_name>-'galar' -> Galarian <pokemon_name> "
         "<pokemon_name>-'paldea' -> Paldean <pokemon_name> "
         "<pokemon_name>-'hisui' -> Hisuian <pokemon_name> "
-        "If there are duplicates that are not regional or mega form differences, then only include one of the shared species "
+        "If there are duplicates that are not regional or mega form differences, then include one copy of the species name (shared prefix)"
         "It's very important that you format the names in that way. Double check there are no hyphens and regions come before species name, but do not add regional/mega information that wasn't in the name of the pokemon already "
         "Return one sentence only"
     )
