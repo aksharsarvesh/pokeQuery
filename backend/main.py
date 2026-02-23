@@ -282,7 +282,7 @@ def answer_in_english(criteria, results):
         "<pokemon_name>-'galar' -> Galarian <pokemon_name> "
         "<pokemon_name>-'paldea' -> Paldean <pokemon_name> "
         "<pokemon_name>-'hisui' -> Hisuian <pokemon_name> "
-        "If there are duplicates that are not regional or mega form differences, then include one copy of the species name (shared prefix). Do not include the other form data if there are duplicates. If there are multiple pokemon with very similar names, this is an indication that they should be grouped. "
+        "If there are duplicates that are not regional or mega form differences, then include one copy of the species name (shared prefix). If you do this, then exclude the other form data - otherwise keep it (the form was important). If there are multiple pokemon with very similar names, this is an indication that they should be grouped. "
         "It's very important that you format the names in that way. Double check there are no hyphens and regions come before species name, but do not add regional/mega information that wasn't in the name of the pokemon already "
         "Return one sentence only"
     )
