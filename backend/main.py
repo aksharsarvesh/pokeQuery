@@ -183,7 +183,7 @@ def extract_criteria_from_text(query: str) -> dict:
         "Correct spelling and spacing to canonical move/ability/type names. "
         "Do not copy the terms directly. Confirm each is a real type/move/ability and is spelled and spaced correctly. "
         "If a user token appears to be concatenated, split it into the intended multi-word term. "
-        "If truly ambiguous, omit that token instead of guessing. "
+        "If truly ambiguous, or if they are requesting unknown criteria, it may not be in your training data; Use your best judgement for what the user meant. "
         "Also in the notes attribute write down any editing you had to make to the query, how and why."
     )
     user = f"Query: {query}"
@@ -282,7 +282,7 @@ def answer_in_english(criteria, results):
         "<pokemon_name>-'galar' -> Galarian <pokemon_name> "
         "<pokemon_name>-'paldea' -> Paldean <pokemon_name> "
         "<pokemon_name>-'hisui' -> Hisuian <pokemon_name> "
-        "If there are duplicates that are not regional or mega form differences, then include one copy of the species name (shared prefix)"
+        "If there are duplicates that are not regional or mega form differences, then include one copy of the species name (shared prefix). Do not include the other form data. If there are multiple pokemon with very similar names, this is an indication that they should be grouped. "
         "It's very important that you format the names in that way. Double check there are no hyphens and regions come before species name, but do not add regional/mega information that wasn't in the name of the pokemon already "
         "Return one sentence only"
     )
