@@ -39,6 +39,13 @@ supabase_url = require_env("SUPABASE_URL")
 supabase_key = require_env("SUPABASE_KEY")
 db = create_client(supabase_url, supabase_key)
 openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+cerebras_api_key = os.getenv("CEREBRAS_API_KEY")
+cerebras_model = os.getenv("CEREBRAS_MODEL", "gpt-oss-120b")
+cerebras_client = (
+    OpenAI(base_url="https://api.cerebras.ai/v1", api_key=cerebras_api_key)
+    if cerebras_api_key
+    else None
+)
 
 AllowedOp = Literal[
     "eq",
@@ -249,13 +256,13 @@ def search(plan: dict):
     return {"results": [row.get("name") for row in rows]}
 
 def answer_in_english(criteria, results):
-    if not openai_client.api_key:
-        raise ValueError("Missing OPENAI_API_KEY")
+    if not cerebras_client:
+        raise ValueError("Missing CEREBRAS_API_KEY")
 
     system = (
         "You are given a list of pokemon names along with criteria that they all fulfill "
         "Criteria will include 6 lists of types, moves, abilities, as well as exclusions of those "
-        "For each of these lists that aren't empty, please declare in plain English that the pokemon that meet these criteria are the list "
+        "For each of these lists that aren't empty, please declare in plain English that the pokemon (capitalized names) that meet these criteria are the list "
         "For example, '<type> pokemon that know <move_1> and <move_2> and have <ability> are <pokemon_1>, <pokemon_2>, and <pokemon_3>"
         "Finally, some pokemon have special names with hyphens. The following are rules to handle these "
         "If the pokemon is a mega pokemon, call it 'mega <pokemon_name' i.e. "
@@ -267,21 +274,22 @@ def answer_in_english(criteria, results):
         "<pokemon_name>-'galar' -> Galarian <pokemon_name> "
         "<pokemon_name>-'paldea' -> Paldean <pokemon_name> "
         "<pokemon_name>-'hisui' -> Hisuian <pokemon_name> "
-        "Only if the pokemon is not a mega or regional form but still has hyphens in its name, then there is irrelevant information about its form after the hyphen. We can exclude information about its form. If this causes the name to be a duplicate, then only use one of those "
+        "If there are duplicates that are not regional or mega form differences, then only include one of the shared species "
         "It's very important that you format the names in that way. Double check there are no hyphens and regions come before species name, but do not add regional/mega information that wasn't in the name of the pokemon already "
         "Return one sentence only"
     )
     user = f"Criteria: {criteria}, Results: {results}"
     
-    resp = openai_client.chat.completions.create(
-        model="gpt-4.1",
+    resp = cerebras_client.chat.completions.create(
+        model=cerebras_model,
         messages=[
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ],
-        
     )
-    return resp.choices[0].message.content or ""
+    text = resp.choices[0].message.content or ""
+    # Normalize non-standard spaces to plain spaces for consistent rendering.
+    return text.replace("\u202F", " ").replace("\u00A0", " ").replace("\u2009", " ")
 class TextQueryRequest(BaseModel):
     query: str
 
