@@ -174,15 +174,21 @@ def extract_criteria_from_text(query: str) -> dict:
         raise ValueError("Missing OPENAI_API_KEY")
 
     system = (
-        "You extract search criteria for Pokemon. Return only JSON with keys "
+        "You extract search criteria for Pokemon and return only JSON. "
+        "Return only JSON with keys "
         '"types", "moves", "abilities", "exclude_types", "exclude_moves", '
         '"exclude_abilities". Values must be arrays of lowercase strings. '
-        "Only include items explicitly requested. Do not add extra keys. "
-        "Sometimes the user will have typos in their query. For example, missing a space in a two-word move or ability. Use your best judgement to try and figure out what they meant in these cases. You are free to fix these typos")
+        "Do not add any keys outside that schema. "
+        "Only include items explicitly requested by the user. "
+        "Correct spelling and spacing to canonical move/ability/type names. "
+        "Do not copy the terms directly. Confirm each is a real type/move/ability and is spelled and spaced correctly. "
+        "If a user token appears to be concatenated, split it into the intended multi-word term. "
+        "If truly ambiguous, omit that token instead of guessing. "
+    )
     user = f"Query: {query}"
 
-    resp = openai_client.chat.completions.create(
-        model="gpt-5.1",
+    resp = cerebras_client.chat.completions.create(
+        model=cerebras_model,
         messages=[
             {"role": "system", "content": system},
             {"role": "user", "content": user},
@@ -191,7 +197,7 @@ def extract_criteria_from_text(query: str) -> dict:
     )
     content = resp.choices[0].message.content or "{}"
     data = json.loads(content)
-    
+    print(data)
     types = _normalize_list(data.get("types", []), MAX_TYPES)
     moves = _normalize_list(data.get("moves", []), MAX_MOVES)
     abilities = _normalize_list(data.get("abilities", []), MAX_ABILITIES)
@@ -264,6 +270,7 @@ def answer_in_english(criteria, results):
         "Criteria will include 6 lists of types, moves, abilities, as well as exclusions of those "
         "For each of these lists that aren't empty, please declare in plain English that the pokemon (capitalized names) that meet these criteria are the list "
         "For example, '<type> pokemon that know <move_1> and <move_2> and have <ability> are <pokemon_1>, <pokemon_2>, and <pokemon_3>"
+        "Capitalize the criteria. "
         "Finally, some pokemon have special names with hyphens. The following are rules to handle these "
         "If the pokemon is a mega pokemon, call it 'mega <pokemon_name' i.e. "
         "<pokemon_name>-'mega' -> Mega <pokemon_name> "
