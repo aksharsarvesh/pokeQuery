@@ -144,7 +144,6 @@ def execute_supabase_plan(supabase, plan: dict) -> list[dict]:
     resp = q.execute()
     data = getattr(resp, "data", None)
     err = getattr(resp, "error", None)
-
     if err:
         raise RuntimeError(err)
 
@@ -271,6 +270,7 @@ def answer_in_english(criteria, results):
         "Criteria will include 6 lists of types, moves, abilities, as well as exclusions of those "
         "For each of these lists that aren't empty, please declare in plain English that the pokemon (capitalized names) that meet these criteria are the list "
         "For example, '<type> pokemon that know <move_1> and <move_2> and have <ability> are <pokemon_1>, <pokemon_2>, and <pokemon_3>"
+        "For a single pokemon output, 'The <type> pokemon that knows <move_1> and <move_2> and has <ability> is <pokemon>"
         "Capitalize the criteria. "
         "Finally, some pokemon have special names with hyphens. The following are rules to handle these "
         "If the pokemon is a mega pokemon, call it 'mega <pokemon_name>' i.e. "
@@ -282,9 +282,11 @@ def answer_in_english(criteria, results):
         "<pokemon_name>-'galar' -> Galarian <pokemon_name> "
         "<pokemon_name>-'paldea' -> Paldean <pokemon_name> "
         "<pokemon_name>-'hisui' -> Hisuian <pokemon_name> "
-        "If there are duplicates that are not regional or mega form differences, then include one copy of the species name (shared prefix). If you do this, then exclude the other form data - otherwise keep it (the form was important). If there are multiple pokemon with very similar names, this is an indication that they should be grouped. "
+        "The database may return multiple of the same species of pokemon, just in different forms or genders that all satisfy the criteria. These will have names that have shared prefixes up to the first hyphen, like 'urshifu-rapid-strike' and 'urshifu-single-strike.' These are duplicates, and we do not care for duplicates. "
+        "If there are species duplicates that are not regional or mega form differences, then include only one copy of the species name (shared prefix) and exclude the other form data. If it wasn't a duplicate, the form/gender was important, so keep it. "
+        "Confirm that there are no duplicates in your output"
         "It's very important that you format the names in that way. Double check there are no hyphens and regions come before species name, but do not add regional/mega information that wasn't in the name of the pokemon already "
-        "Return one sentence only"
+        "Return one sentence only, and use correct grammar. "
     )
     user = f"Criteria: {criteria}, Results: {results}"
     
