@@ -271,7 +271,7 @@ def answer_in_english(criteria, results):
         "For each of these lists that aren't empty, please declare in plain English that the pokemon (capitalized names) that meet these criteria are the list "
         "For example, '<type> Pokémon that know <move_1> and <move_2> and have <ability> are <pokemon_1>, <pokemon_2>, and <pokemon_3>"
         "For a single pokemon output, 'The <type> Pokémon that knows <move_1> and <move_2> and has <ability> is <pokemon>"
-        "Capitalize the criteria. "
+        "Capitalize the criteria, and make sure to always include them in your output as previously formatted for triaging. "
         "Finally, some pokemon have special names with hyphens. The following are rules to handle these "
         "If the pokemon is a mega pokemon, call it 'mega <pokemon_name>' i.e. "
         "<pokemon_name>-'mega' -> Mega <pokemon_name> "
