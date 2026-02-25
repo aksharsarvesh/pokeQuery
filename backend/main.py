@@ -283,8 +283,8 @@ def answer_in_english(criteria, results):
         "<pokemon_name>-'paldea' -> Paldean <pokemon_name> "
         "<pokemon_name>-'hisui' -> Hisuian <pokemon_name> "
         "The database may return duplicates of the same species of pokemon, just in different forms or genders that all satisfy the criteria. These will have names that have shared prefixes up to the first hyphen, for example 'urshifu-rapid-strike' and 'urshifu-single-strike.' These are duplicates, and we do not care for duplicates. "
-        "If there are species duplicates that are not regional form differences, then include only one copy of the species name (shared prefix) and exclude the other form data. If it wasn't a duplicate, the form/gender was important, so keep it. "
-        "Confirm that there are no duplicates in your output"
+        "If there are species duplicates that are not regional form differences, then include only one copy of the species name (shared prefix) and exclude the other form data. Only if it wasn't a duplicate, then the form/gender was important, so keep it. Also, regional information should never be excluded"
+        "If there are multiple names that have the same first word, then those are duplicates. Confirm this does not happen in your output. "
         "It's very important that you format the names in that way. Confirm there are no hyphens and regions come before species name, but do not add regional/mega information that wasn't in the name of the pokemon already "
         "Return one sentence only, and use correct grammar. "
     )
