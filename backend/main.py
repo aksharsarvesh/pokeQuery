@@ -38,7 +38,6 @@ load_dotenv()
 supabase_url = require_env("SUPABASE_URL")
 supabase_key = require_env("SUPABASE_KEY")
 db = create_client(supabase_url, supabase_key)
-openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 cerebras_api_key = os.getenv("CEREBRAS_API_KEY")
 cerebras_model = os.getenv("CEREBRAS_MODEL", "gpt-oss-120b")
 cerebras_client = (
@@ -169,8 +168,8 @@ def _normalize_list(value: Any, max_items: int) -> list[str]:
 
 
 def extract_criteria_from_text(query: str) -> dict:
-    if not openai_client.api_key:
-        raise ValueError("Missing OPENAI_API_KEY")
+    if not cerebras_client:
+        raise ValueError("Missing CEREBRAS_API_KEY")
 
     system = (
         "You extract search criteria for Pokemon and return only JSON. "
