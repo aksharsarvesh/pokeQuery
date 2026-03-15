@@ -14,8 +14,7 @@ export default function Home() {
     event.preventDefault();
     try {
       setLoading(true);
-      const apiBase = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
-      const res = await fetch(`${apiBase}/api/search_from_text`, {
+      const res = await fetch("/api/search_from_text", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query }),
