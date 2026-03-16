@@ -34,6 +34,7 @@ async function submitPokemonQuery(query: string): Promise<string> {
 export default function Home() {
   const [query, setQuery] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [hasSearched, setHasSearched] = useState(false);
   const [searchState, setSearchState] = useState<SearchState>({
     error: "",
     response: "",
@@ -53,6 +54,7 @@ export default function Home() {
 
     try {
       setIsSubmitting(true);
+      setHasSearched(true);
       setSearchState({ error: "", response: "" });
 
       const response = await submitPokemonQuery(trimmedQuery);
@@ -114,9 +116,17 @@ export default function Home() {
             <p className="mt-4 text-lg leading-8 text-foreground/85">
               {searchState.response}
             </p>
-          ) : (
+          ) : isSubmitting ? (
             <p className="mt-4 text-sm leading-7 text-foreground/55">
               Thinking...
+            </p>
+          ) : hasSearched ? (
+            <p className="mt-4 text-sm leading-7 text-foreground/55">
+              No result yet.
+            </p>
+          ) : (
+            <p className="mt-4 text-sm leading-7 text-foreground/55">
+              Describe the Pokemon you want to find.
             </p>
           )}
         </section>
