@@ -1,5 +1,4 @@
 import OpenAI from "openai";
-import { zodResponseFormat } from "openai/helpers/zod";
 import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
 
@@ -8,57 +7,78 @@ import { requireEnv } from "@/lib/server/env";
 export type QueryFilter = {
   col: "types" | "moves" | "abilities";
   op: "contains" | "not_contains";
-  val: string[];
+  val: string;
 };
 
 export type QueryPlan = {
   table: "pokemon_data";
   select: "name";
   filters: QueryFilter[];
-  order: Array<{
-    col: "name" | "types" | "moves" | "abilities";
-    ascending: boolean;
-  }>;
-  limit: number;
 };
 
 const QueryFilterSchema = z.object({
   col: z.enum(["types", "moves", "abilities"]),
   op: z.enum(["contains", "not_contains"]),
-  val: z.array(z.string()),
+  val: z.string(),
 });
 
 const QueryPlanSchema = z.object({
   table: z.literal("pokemon_data"),
   select: z.literal("name"),
-  filters: z.array(QueryFilterSchema).max(6),
-  order: z
-    .array(
-      z.object({
-        col: z.enum(["name", "types", "moves", "abilities"]),
-        ascending: z.boolean(),
-      }),
-    ),
-  limit: z.number().int().min(1).max(200),
+  filters: z.array(QueryFilterSchema).max(7),
 });
 
 const ModelPlanSchema = z.object({
-  filters: z.array(QueryFilterSchema).max(6),
-  order: z
-    .array(
-      z.object({
-        col: z.enum(["name", "types", "moves", "abilities"]),
-        ascending: z.boolean(),
-      }),
-    ),
-  limit: z.number().int().min(1).max(200),
+  filters: z.array(QueryFilterSchema).max(7),
+  notes: z.array(z.string()),
 });
+
+const CEREBRAS_MODEL_PLAN_RESPONSE_FORMAT = {
+  type: "json_schema" as const,
+  json_schema: {
+    name: "pokemon_query_plan",
+    strict: true,
+    schema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        filters: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              col: {
+                type: "string",
+                enum: ["types", "moves", "abilities"],
+              },
+              op: {
+                type: "string",
+                enum: ["contains", "not_contains"],
+              },
+              val: {
+                type: "string",
+              },
+            },
+            required: ["col", "op", "val"],
+          },
+        },
+        notes: {
+          type: "array",
+          items: {
+            type: "string",
+          },
+        },
+      },
+      required: ["filters", "notes"],
+    },
+  },
+};
 
 const ALLOWED_TABLES = new Set(["pokemon_data"]);
 const ALLOWED_COLUMNS: Record<string, Set<string>> = {
   pokemon_data: new Set(["name", "types", "moves", "abilities"]),
 };
-const MAX_LIMIT = 2000;
 const MAX_TYPES = 2;
 const MAX_MOVES = 4;
 const MAX_ABILITIES = 1;
@@ -129,130 +149,46 @@ function normalizeList(value: unknown, maxItems: number): string[] {
   return out;
 }
 
-function coerceFilter(raw: unknown): QueryFilter | null {
-  if (!raw || typeof raw !== "object") {
-    return null;
-  }
-
-  const record = raw as Record<string, unknown>;
-  const rawCol = record.col ?? record.column ?? record.field ?? record.attribute;
-  const rawOp = record.op ?? record.operator ?? record.comparison;
-  const rawVal = record.val ?? record.value ?? record.values;
-
-  const colAliases: Record<string, QueryFilter["col"]> = {
-    type: "types",
-    types: "types",
-    move: "moves",
-    moves: "moves",
-    ability: "abilities",
-    abilities: "abilities",
-  };
-
-  const opAliases: Record<string, QueryFilter["op"]> = {
-    contains: "contains",
-    include: "contains",
-    includes: "contains",
-    has: "contains",
-    is: "contains",
-    equals: "contains",
-    not_contains: "not_contains",
-    excludes: "not_contains",
-    exclude: "not_contains",
-    not_has: "not_contains",
-    not: "not_contains",
-    "!=": "not_contains",
-  };
-
-  if (typeof rawCol !== "string" || typeof rawOp !== "string") {
-    return null;
-  }
-
-  const col = colAliases[rawCol.trim().toLowerCase()];
-  const op = opAliases[rawOp.trim().toLowerCase()];
-  if (!col || !op) {
-    return null;
-  }
-
-  const maxItems = col === "types" ? MAX_TYPES : col === "moves" ? MAX_MOVES : MAX_ABILITIES;
-  const val = Array.isArray(rawVal)
-    ? normalizeList(rawVal, maxItems)
-    : typeof rawVal === "string"
-      ? normalizeList([rawVal], maxItems)
-      : [];
-
-  if (val.length === 0) {
-    return null;
-  }
-
-  return { col, op, val };
-}
-
-function coercePlan(raw: unknown): QueryPlan {
-  const record = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
-  const rawFilters = Array.isArray(record.filters) ? record.filters : [];
-  const rawOrder = Array.isArray(record.order) ? record.order : [];
-  const rawLimit = record.limit;
-  const limit =
-    typeof rawLimit === "number"
-      ? rawLimit
-      : typeof rawLimit === "string" && Number.isFinite(Number(rawLimit))
-        ? Number(rawLimit)
-        : 200;
-
-  return {
-    table: "pokemon_data",
-    select: "name",
-    filters: rawFilters.map(coerceFilter).filter((filter): filter is QueryFilter => filter !== null),
-    order: rawOrder
-      .map((item) => {
-        if (!item || typeof item !== "object") {
-          return null;
-        }
-        const record = item as Record<string, unknown>;
-        const col = record.col;
-        const ascending = record.ascending;
-        if (
-          (col === "name" || col === "types" || col === "moves" || col === "abilities") &&
-          typeof ascending === "boolean"
-        ) {
-          return { col, ascending };
-        }
-        return null;
-      })
-      .filter(
-        (
-          item,
-        ): item is {
-          col: "name" | "types" | "moves" | "abilities";
-          ascending: boolean;
-        } => item !== null,
-      ),
-    limit,
-  };
-}
-
 function normalizePlan(plan: QueryPlan): QueryPlan {
-  const normalizedFilters = plan.filters
-    .map((filter) => ({
-      col: filter.col,
-      op: filter.op,
-      val: normalizeList(
-        filter.val,
-        filter.col === "types"
-          ? MAX_TYPES
-          : filter.col === "moves"
-            ? MAX_MOVES
-            : MAX_ABILITIES,
-      ),
-    }))
-    .filter((filter) => filter.val.length > 0);
+  const limitByColumn = {
+    types: MAX_TYPES,
+    moves: MAX_MOVES,
+    abilities: MAX_ABILITIES,
+  } as const;
+  const counts = {
+    types: 0,
+    moves: 0,
+    abilities: 0,
+  };
+  const seen = new Set<string>();
+  const normalizedFilters: QueryFilter[] = [];
+
+  for (const filter of plan.filters) {
+    const values = normalizeList([filter.val], limitByColumn[filter.col]);
+    for (const value of values) {
+      if (counts[filter.col] >= limitByColumn[filter.col]) {
+        break;
+      }
+
+      const key = `${filter.col}:${filter.op}:${value}`;
+      if (seen.has(key)) {
+        continue;
+      }
+
+      seen.add(key);
+      counts[filter.col] += 1;
+      normalizedFilters.push({
+        col: filter.col,
+        op: filter.op,
+        val: value,
+      });
+    }
+  }
 
   return {
     table: "pokemon_data",
     select: "name",
     filters: normalizedFilters,
-    order: plan.order,
-    limit: Math.min(Math.max(plan.limit, 1), 200),
   };
 }
 
@@ -262,9 +198,9 @@ function applyFilter(query: QueryBuilder, table: string, filter: QueryFilter) {
 
   switch (op) {
     case "contains":
-      return query.contains(col, val);
+      return query.contains(col, [val]);
     case "not_contains":
-      return query.not(col, "cs", toPostgresTextArrayLiteral(val));
+      return query.not(col, "cs", toPostgresTextArrayLiteral([val]));
     default:
       throw new Error(`Unsupported op: ${op satisfies never}`);
   }
@@ -278,20 +214,13 @@ export async function executeSupabasePlan(plan: QueryPlan): Promise<Record<strin
   }
 
   const select = plan.select;
-  const limit = Math.min(Math.max(plan.limit, 1), MAX_LIMIT);
 
   let query = createBaseQuery(table, select);
 
   for (const filter of plan.filters) {
     query = applyFilter(query, table, filter);
   }
-
-  for (const order of plan.order) {
-    ensureAllowedColumn(table, order.col);
-    query = query.order(order.col, { ascending: order.ascending });
-  }
-
-  const { data, error } = await query.limit(limit);
+  const { data, error } = await query;
   if (error) {
     throw new Error(error.message);
   }
@@ -307,60 +236,64 @@ export async function planFromText(query: string): Promise<QueryPlan> {
 
   const system = [
     "Convert the user request into a Pokemon query plan and return only JSON.",
-    'Return only the keys "filters", "order", and "limit".',
+    'Return only the keys "filters" and "notes".',
     'Allowed filter columns: "types", "moves", "abilities".',
     'Allowed filter operators: "contains", "not_contains".',
-    'Use an empty array for "filters" or "order" when there are none.',
-    "Each filter value must be an array of canonical lowercase strings.",
+    'Use an empty array for "filters" when there are none.',
+    "Each filter value must be a canonical lowercase string.",
     "Only include filters explicitly requested by the user.",
     "Correct spelling and spacing to canonical move, ability, and type names.",
     "Do not copy misspelled or malformed terms directly into the output.",
     "Confirm each extracted term is a real type, move, or ability and is spelled and spaced correctly.",
     "If a user token appears concatenated, split it into the intended multi-word term.",
     "If a term is ambiguous or uncommon, use your best judgment to map it to the intended canonical Pokemon term.",
+    "For example, raindance -> rain dance",
+    "Also in the notes attribute write down any editing you had to make to the query, how and why.",
     "Do not add extra keys or explanations.",
   ].join(" ");
 
-  try {
-    const response = await cerebrasClient.chat.completions.parse({
-      model: getCerebrasModel(),
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: `Query: ${query}` },
-      ],
-      response_format: zodResponseFormat(ModelPlanSchema, "pokemon_query_plan"),
-    });
+  const response = await cerebrasClient.chat.completions.create({
+    model: getCerebrasModel(),
+    messages: [
+      { role: "system", content: system },
+      { role: "user", content: `Query: ${query}` },
+    ],
+    response_format: CEREBRAS_MODEL_PLAN_RESPONSE_FORMAT,
+  });
 
-    const parsed = response.choices[0]?.message.parsed;
-    if (!parsed) {
-      throw new Error("Model did not return a parsed query plan");
-    }
-
-    return normalizePlan({
-      table: "pokemon_data",
-      select: "name",
-      filters: parsed.filters,
-      order: parsed.order,
-      limit: parsed.limit,
-    });
-  } catch (error) {
-    const response = await cerebrasClient.chat.completions.create({
-      model: getCerebrasModel(),
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: `Query: ${query}` },
-      ],
-      response_format: { type: "json_object" },
-    });
-
-    const content = response.choices[0]?.message?.content;
-    if (!content) {
-      throw error;
-    }
-
-    const parsed = QueryPlanSchema.parse(coercePlan(JSON.parse(content)));
-    return normalizePlan(parsed);
+  const content = response.choices[0]?.message?.content;
+  if (!content) {
+    throw new Error("Model did not return structured output content");
   }
+  const parsed = ModelPlanSchema.parse(JSON.parse(content));
+  console.log("[planFromText] notes", parsed.notes);
+
+  return normalizePlan({
+    table: "pokemon_data",
+    select: "name",
+    filters: parsed.filters,
+  });
+}
+
+function titleCasePokemonTerm(value: string): string {
+  return value
+    .split(/[\s-]+/g)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function joinWithAnd(values: string[]): string {
+  if (values.length === 0) {
+    return "";
+  }
+  if (values.length === 1) {
+    return values[0];
+  }
+  if (values.length === 2) {
+    return `${values[0]} and ${values[1]}`;
+  }
+  return `${values.slice(0, -1).join(", ")}, and ${values.at(-1)}`;
 }
 
 export async function answerInEnglish(
