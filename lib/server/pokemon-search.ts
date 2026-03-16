@@ -282,17 +282,17 @@ export async function planFromText(query: string): Promise<QueryPlan> {
     'Use an empty array for "filters" when there are none.',
     "Each filter value must be a canonical lowercase string.",
     "Only include filters explicitly requested by the user.",
+    "Do not make up criteria though. If a move or ability is asked for by description rather than name, do not try to figure out the intended move or ability",
     "Correct spelling and spacing to canonical move, ability, and type names.",
     "Do not copy misspelled or malformed terms directly into the output.",
     "Confirm each extracted term is a real type, move, or ability and is spelled and spaced correctly.",
     "If a user token appears concatenated, split it into the intended multi-word term.",
-    "If a term is ambiguous or uncommon, use your best judgment to map it to the intended canonical Pokemon term.",
+    "If a term is ambiguous or uncommon, use your best judgment to map it to the intended canonical Pokemon term, only if they were trying to ask for it by name, not description.",
     "For example, raindance -> rain dance",
     "The database is also hard-coded to use spaces over hyphens (e.g. u turn not u-turn)",
     "Also in the notes attribute write down any editing you had to make to the query, how and why.",
     "Do not add extra keys or explanations.",
   ].join(" ");
-
   const response = await cerebrasClient.chat.completions.create({
     model: getCerebrasModel(),
     messages: [
