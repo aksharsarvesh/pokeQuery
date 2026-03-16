@@ -29,11 +29,11 @@ const QueryFilterSchema = z.object({
 const QueryPlanSchema = z.object({
   table: z.literal("pokemon_data"),
   select: z.literal("name"),
-  filters: z.array(QueryFilterSchema).max(20),
+  filters: z.array(QueryFilterSchema),
 });
 
 const ModelPlanSchema = z.object({
-  filters: z.array(QueryFilterSchema).max(20),
+  filters: z.array(QueryFilterSchema),
   notes: z.array(z.string()),
 });
 
@@ -83,13 +83,11 @@ const ALLOWED_TABLES = new Set<QueryPlan["table"]>(["pokemon_data"]);
 const ALLOWED_COLUMNS: Record<QueryPlan["table"], Set<string>> = {
   pokemon_data: new Set(["name", "types", "moves", "abilities"]),
 };
-const MAX_TYPES = 10;
-const MAX_MOVES = 10;
-const MAX_ABILITIES = 10;
+const UNBOUNDED_FILTERS = Number.POSITIVE_INFINITY;
 const FILTER_LIMITS = {
-  types: MAX_TYPES,
-  moves: MAX_MOVES,
-  abilities: MAX_ABILITIES,
+  types: UNBOUNDED_FILTERS,
+  moves: UNBOUNDED_FILTERS,
+  abilities: UNBOUNDED_FILTERS,
 } as const;
 const supabaseClient = createClient(
   requireEnv("SUPABASE_URL"),
