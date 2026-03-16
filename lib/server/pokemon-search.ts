@@ -335,6 +335,7 @@ const SPACE_NORMALIZATION_PATTERN = /[\u202F\u00A0\u2009]/g;
 const MEGA_X_SUFFIX = ["mega", "x"] as const;
 const MEGA_Y_SUFFIX = ["mega", "y"] as const;
 const MEGA_SUFFIX = ["mega"] as const;
+const GENERIC_FORM_SUFFIXES = new Set(["standard"]);
 
 type ParsedPokemonName = {
   displayName: string;
@@ -386,6 +387,41 @@ function formatDisplayName(regionalPrefix: string | null, baseName: string, mega
   return [regionalPrefix, `${megaPrefix}${baseName}`].filter(Boolean).join(" ");
 }
 
+function extractRegionalPrefix(parts: string[]): {
+  parts: string[];
+  regionalPrefix: string | null;
+} {
+  const regionalIndex = parts.findIndex((part, index) => {
+    if (index === 0 || !isRegionalSuffix(part)) {
+      return false;
+    }
+
+    // Regional forms are encoded as "<species>-<region>-...".
+    return index === 1;
+  });
+  if (regionalIndex === -1) {
+    return {
+      parts,
+      regionalPrefix: null,
+    };
+  }
+
+  const regionalToken = parts[regionalIndex];
+  return {
+    parts: parts.filter((_, index) => index !== regionalIndex),
+    regionalPrefix: REGIONAL_FORM_PREFIX[regionalToken],
+  };
+}
+
+function stripGenericFormSuffix(parts: string[]): string[] {
+  const trailingPart = parts.at(-1);
+  if (!trailingPart || !GENERIC_FORM_SUFFIXES.has(trailingPart)) {
+    return parts;
+  }
+
+  return parts.slice(0, -1);
+}
+
 function extractPokemonNameInfo(rawName: string): ParsedPokemonName {
   const originalParts = splitPokemonName(rawName);
   if (originalParts.length === 0) {
@@ -397,14 +433,10 @@ function extractPokemonNameInfo(rawName: string): ParsedPokemonName {
     };
   }
 
-  let parts = [...originalParts];
-  let regionalPrefix: string | null = null;
-
-  const trailingRegion = parts.at(-1);
-  if (trailingRegion && isRegionalSuffix(trailingRegion)) {
-    regionalPrefix = REGIONAL_FORM_PREFIX[trailingRegion];
-    parts = parts.slice(0, -1);
-  }
+  const { regionalPrefix, parts: extractedParts } = extractRegionalPrefix([
+    ...originalParts,
+  ]);
+  let parts = extractedParts;
 
   let megaPrefix = "";
   if (hasTrailingSuffix(parts, MEGA_X_SUFFIX)) {
@@ -419,6 +451,8 @@ function extractPokemonNameInfo(rawName: string): ParsedPokemonName {
     megaPrefix = "Mega ";
     parts = stripTrailingSuffix(parts, MEGA_SUFFIX);
   }
+
+  parts = stripGenericFormSuffix(parts);
 
   const displayBase = titleCasePokemonTerm(parts.join(" "));
   const speciesStem = parts[0] ?? "";
