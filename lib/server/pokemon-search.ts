@@ -241,13 +241,11 @@ export async function searchPokemon(plan: QueryPlan): Promise<string[]> {
 }
 
 export async function searchPokemonRowsAndNames(plan: QueryPlan): Promise<{
-  rows: PokemonRow[];
   results: string[];
 }> {
   const rows = await executeSupabasePlan(plan);
 
   return {
-    rows,
     results: extractPokemonNames(rows),
   };
 }
@@ -255,16 +253,14 @@ export async function searchPokemonRowsAndNames(plan: QueryPlan): Promise<{
 export async function searchPokemonFromText(query: string): Promise<{
   answer: string;
   plan: QueryPlan;
-  rows: PokemonRow[];
   results: string[];
 }> {
   const plan = await planFromText(query);
-  const { rows, results } = await searchPokemonRowsAndNames(plan);
+  const { results } = await searchPokemonRowsAndNames(plan);
 
   return {
     answer: await answerInEnglish(plan, results),
     plan,
-    rows,
     results,
   };
 }

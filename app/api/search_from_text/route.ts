@@ -20,14 +20,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ detail: "Missing query" }, { status: 400 });
     }
 
-    const { answer, plan, rows, results } = await searchPokemonFromText(query);
+    const { answer, plan, results } = await searchPokemonFromText(query);
     console.log(
       "[api/search_from_text] plan",
       inspect(plan, { depth: null, colors: false }),
-    );
-    console.log(
-      "[api/search_from_text] rows",
-      inspect(rows, { depth: null, colors: false }),
     );
     console.log(
       "[api/search_from_text] results",
