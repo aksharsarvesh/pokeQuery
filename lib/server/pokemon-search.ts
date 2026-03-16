@@ -1,48 +1,58 @@
 import OpenAI from "openai";
+import { zodResponseFormat } from "openai/helpers/zod";
 import { createClient } from "@supabase/supabase-js";
+import { z } from "zod";
 
 import { requireEnv } from "@/lib/server/env";
 
-type AllowedOp =
-  | "eq"
-  | "neq"
-  | "gt"
-  | "gte"
-  | "lt"
-  | "lte"
-  | "like"
-  | "ilike"
-  | "in"
-  | "contains"
-  | "not_contains";
-
-type FilterValue = string | number | boolean | string[];
-
 export type QueryFilter = {
-  col: string;
-  op: AllowedOp;
-  val: FilterValue;
+  col: "types" | "moves" | "abilities";
+  op: "contains" | "not_contains";
+  val: string[];
 };
 
 export type QueryPlan = {
   table: "pokemon_data";
-  select?: string;
-  filters?: QueryFilter[];
-  order?: Array<{
-    col: string;
-    ascending?: boolean;
+  select: "name";
+  filters: QueryFilter[];
+  order: Array<{
+    col: "name" | "types" | "moves" | "abilities";
+    ascending: boolean;
   }>;
-  limit?: number;
+  limit: number;
 };
 
-type SearchCriteria = {
-  types: string[];
-  moves: string[];
-  abilities: string[];
-  exclude_types: string[];
-  exclude_moves: string[];
-  exclude_abilities: string[];
-};
+const QueryFilterSchema = z.object({
+  col: z.enum(["types", "moves", "abilities"]),
+  op: z.enum(["contains", "not_contains"]),
+  val: z.array(z.string()),
+});
+
+const QueryPlanSchema = z.object({
+  table: z.literal("pokemon_data"),
+  select: z.literal("name"),
+  filters: z.array(QueryFilterSchema).max(6),
+  order: z
+    .array(
+      z.object({
+        col: z.enum(["name", "types", "moves", "abilities"]),
+        ascending: z.boolean(),
+      }),
+    ),
+  limit: z.number().int().min(1).max(200),
+});
+
+const ModelPlanSchema = z.object({
+  filters: z.array(QueryFilterSchema).max(6),
+  order: z
+    .array(
+      z.object({
+        col: z.enum(["name", "types", "moves", "abilities"]),
+        ascending: z.boolean(),
+      }),
+    ),
+  limit: z.number().int().min(1).max(200),
+});
 
 const ALLOWED_TABLES = new Set(["pokemon_data"]);
 const ALLOWED_COLUMNS: Record<string, Set<string>> = {
@@ -119,41 +129,141 @@ function normalizeList(value: unknown, maxItems: number): string[] {
   return out;
 }
 
+function coerceFilter(raw: unknown): QueryFilter | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+
+  const record = raw as Record<string, unknown>;
+  const rawCol = record.col ?? record.column ?? record.field ?? record.attribute;
+  const rawOp = record.op ?? record.operator ?? record.comparison;
+  const rawVal = record.val ?? record.value ?? record.values;
+
+  const colAliases: Record<string, QueryFilter["col"]> = {
+    type: "types",
+    types: "types",
+    move: "moves",
+    moves: "moves",
+    ability: "abilities",
+    abilities: "abilities",
+  };
+
+  const opAliases: Record<string, QueryFilter["op"]> = {
+    contains: "contains",
+    include: "contains",
+    includes: "contains",
+    has: "contains",
+    is: "contains",
+    equals: "contains",
+    not_contains: "not_contains",
+    excludes: "not_contains",
+    exclude: "not_contains",
+    not_has: "not_contains",
+    not: "not_contains",
+    "!=": "not_contains",
+  };
+
+  if (typeof rawCol !== "string" || typeof rawOp !== "string") {
+    return null;
+  }
+
+  const col = colAliases[rawCol.trim().toLowerCase()];
+  const op = opAliases[rawOp.trim().toLowerCase()];
+  if (!col || !op) {
+    return null;
+  }
+
+  const maxItems = col === "types" ? MAX_TYPES : col === "moves" ? MAX_MOVES : MAX_ABILITIES;
+  const val = Array.isArray(rawVal)
+    ? normalizeList(rawVal, maxItems)
+    : typeof rawVal === "string"
+      ? normalizeList([rawVal], maxItems)
+      : [];
+
+  if (val.length === 0) {
+    return null;
+  }
+
+  return { col, op, val };
+}
+
+function coercePlan(raw: unknown): QueryPlan {
+  const record = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const rawFilters = Array.isArray(record.filters) ? record.filters : [];
+  const rawOrder = Array.isArray(record.order) ? record.order : [];
+  const rawLimit = record.limit;
+  const limit =
+    typeof rawLimit === "number"
+      ? rawLimit
+      : typeof rawLimit === "string" && Number.isFinite(Number(rawLimit))
+        ? Number(rawLimit)
+        : 200;
+
+  return {
+    table: "pokemon_data",
+    select: "name",
+    filters: rawFilters.map(coerceFilter).filter((filter): filter is QueryFilter => filter !== null),
+    order: rawOrder
+      .map((item) => {
+        if (!item || typeof item !== "object") {
+          return null;
+        }
+        const record = item as Record<string, unknown>;
+        const col = record.col;
+        const ascending = record.ascending;
+        if (
+          (col === "name" || col === "types" || col === "moves" || col === "abilities") &&
+          typeof ascending === "boolean"
+        ) {
+          return { col, ascending };
+        }
+        return null;
+      })
+      .filter(
+        (
+          item,
+        ): item is {
+          col: "name" | "types" | "moves" | "abilities";
+          ascending: boolean;
+        } => item !== null,
+      ),
+    limit,
+  };
+}
+
+function normalizePlan(plan: QueryPlan): QueryPlan {
+  const normalizedFilters = plan.filters
+    .map((filter) => ({
+      col: filter.col,
+      op: filter.op,
+      val: normalizeList(
+        filter.val,
+        filter.col === "types"
+          ? MAX_TYPES
+          : filter.col === "moves"
+            ? MAX_MOVES
+            : MAX_ABILITIES,
+      ),
+    }))
+    .filter((filter) => filter.val.length > 0);
+
+  return {
+    table: "pokemon_data",
+    select: "name",
+    filters: normalizedFilters,
+    order: plan.order,
+    limit: Math.min(Math.max(plan.limit, 1), 200),
+  };
+}
+
 function applyFilter(query: QueryBuilder, table: string, filter: QueryFilter) {
   const { col, op, val } = filter;
   ensureAllowedColumn(table, col);
 
   switch (op) {
-    case "eq":
-      return query.eq(col, val);
-    case "neq":
-      return query.neq(col, val);
-    case "gt":
-      return query.gt(col, val);
-    case "gte":
-      return query.gte(col, val);
-    case "lt":
-      return query.lt(col, val);
-    case "lte":
-      return query.lte(col, val);
-    case "like":
-      return query.like(col, String(val));
-    case "ilike":
-      return query.ilike(col, String(val));
-    case "in":
-      if (!Array.isArray(val)) {
-        throw new Error("in operator requires a list");
-      }
-      return query.in(col, val);
     case "contains":
-      if (!Array.isArray(val)) {
-        throw new Error("contains operator requires a list");
-      }
       return query.contains(col, val);
     case "not_contains":
-      if (!Array.isArray(val)) {
-        throw new Error("not_contains operator requires a list");
-      }
       return query.not(col, "cs", toPostgresTextArrayLiteral(val));
     default:
       throw new Error(`Unsupported op: ${op satisfies never}`);
@@ -161,23 +271,24 @@ function applyFilter(query: QueryBuilder, table: string, filter: QueryFilter) {
 }
 
 export async function executeSupabasePlan(plan: QueryPlan): Promise<Record<string, unknown>[]> {
+  plan = QueryPlanSchema.parse(plan);
   const { table } = plan;
   if (!ALLOWED_TABLES.has(table)) {
     throw new Error(`Disallowed table: ${table}`);
   }
 
-  const select = plan.select ?? "*";
-  const limit = Math.min(Math.max(plan.limit ?? 100, 1), MAX_LIMIT);
+  const select = plan.select;
+  const limit = Math.min(Math.max(plan.limit, 1), MAX_LIMIT);
 
   let query = createBaseQuery(table, select);
 
-  for (const filter of plan.filters ?? []) {
+  for (const filter of plan.filters) {
     query = applyFilter(query, table, filter);
   }
 
-  for (const order of plan.order ?? []) {
+  for (const order of plan.order) {
     ensureAllowedColumn(table, order.col);
-    query = query.order(order.col, { ascending: order.ascending ?? true });
+    query = query.order(order.col, { ascending: order.ascending });
   }
 
   const { data, error } = await query.limit(limit);
@@ -188,84 +299,72 @@ export async function executeSupabasePlan(plan: QueryPlan): Promise<Record<strin
   return (data ?? []) as unknown as Record<string, unknown>[];
 }
 
-export async function extractCriteriaFromText(query: string): Promise<SearchCriteria> {
+export async function planFromText(query: string): Promise<QueryPlan> {
   const cerebrasClient = getCerebrasClient();
   if (!cerebrasClient) {
     throw new Error("Missing CEREBRAS_API_KEY");
   }
 
   const system = [
-    "You extract search criteria for Pokemon and return only JSON.",
-    'Return only JSON with keys "types", "moves", "abilities", "exclude_types", "exclude_moves", "exclude_abilities", "notes".',
-    "Values must be arrays of lowercase strings.",
-    "Do not add any keys outside that schema.",
-    "Only include items explicitly requested by the user.",
-    "Correct spelling and spacing to canonical move/ability/type names.",
-    "Do not copy the terms directly.",
-    "Confirm each is a real type/move/ability and is spelled and spaced correctly.",
-    "If a user token appears to be concatenated, split it into the intended multi-word term.",
-    "If truly ambiguous, or if they are requesting unknown criteria, it may not be in your training data; use your best judgement for what the user meant.",
-    "Also in the notes attribute write down any editing you had to make to the query, how and why.",
+    "Convert the user request into a Pokemon query plan and return only JSON.",
+    'Return only the keys "filters", "order", and "limit".',
+    'Allowed filter columns: "types", "moves", "abilities".',
+    'Allowed filter operators: "contains", "not_contains".',
+    'Use an empty array for "filters" or "order" when there are none.',
+    "Each filter value must be an array of canonical lowercase strings.",
+    "Only include filters explicitly requested by the user.",
+    "Correct spelling and spacing to canonical move, ability, and type names.",
+    "Do not copy misspelled or malformed terms directly into the output.",
+    "Confirm each extracted term is a real type, move, or ability and is spelled and spaced correctly.",
+    "If a user token appears concatenated, split it into the intended multi-word term.",
+    "If a term is ambiguous or uncommon, use your best judgment to map it to the intended canonical Pokemon term.",
+    "Do not add extra keys or explanations.",
   ].join(" ");
 
-  const response = await cerebrasClient.chat.completions.create({
-    model: getCerebrasModel(),
-    messages: [
-      { role: "system", content: system },
-      { role: "user", content: `Query: ${query}` },
-    ],
-    response_format: { type: "json_object" },
-  });
-
-  const content = response.choices[0]?.message?.content ?? "{}";
-  const data = JSON.parse(content) as Record<string, unknown>;
-
-  return {
-    types: normalizeList(data.types, MAX_TYPES),
-    moves: normalizeList(data.moves, MAX_MOVES),
-    abilities: normalizeList(data.abilities, MAX_ABILITIES),
-    exclude_types: normalizeList(data.exclude_types, MAX_TYPES),
-    exclude_moves: normalizeList(data.exclude_moves, MAX_MOVES),
-    exclude_abilities: normalizeList(data.exclude_abilities, MAX_ABILITIES),
-  };
-}
-
-export function buildPlanFromCriteria(criteria: SearchCriteria): QueryPlan {
-  const filters: QueryFilter[] = [];
-
-  if (criteria.types.length > 0) {
-    filters.push({ col: "types", op: "contains", val: criteria.types });
-  }
-  if (criteria.moves.length > 0) {
-    filters.push({ col: "moves", op: "contains", val: criteria.moves });
-  }
-  if (criteria.abilities.length > 0) {
-    filters.push({ col: "abilities", op: "contains", val: criteria.abilities });
-  }
-  if (criteria.exclude_types.length > 0) {
-    filters.push({ col: "types", op: "not_contains", val: criteria.exclude_types });
-  }
-  if (criteria.exclude_moves.length > 0) {
-    filters.push({ col: "moves", op: "not_contains", val: criteria.exclude_moves });
-  }
-  if (criteria.exclude_abilities.length > 0) {
-    filters.push({
-      col: "abilities",
-      op: "not_contains",
-      val: criteria.exclude_abilities,
+  try {
+    const response = await cerebrasClient.chat.completions.parse({
+      model: getCerebrasModel(),
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: `Query: ${query}` },
+      ],
+      response_format: zodResponseFormat(ModelPlanSchema, "pokemon_query_plan"),
     });
-  }
 
-  return {
-    table: "pokemon_data",
-    select: "name",
-    filters,
-    limit: 200,
-  };
+    const parsed = response.choices[0]?.message.parsed;
+    if (!parsed) {
+      throw new Error("Model did not return a parsed query plan");
+    }
+
+    return normalizePlan({
+      table: "pokemon_data",
+      select: "name",
+      filters: parsed.filters,
+      order: parsed.order,
+      limit: parsed.limit,
+    });
+  } catch (error) {
+    const response = await cerebrasClient.chat.completions.create({
+      model: getCerebrasModel(),
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: `Query: ${query}` },
+      ],
+      response_format: { type: "json_object" },
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) {
+      throw error;
+    }
+
+    const parsed = QueryPlanSchema.parse(coercePlan(JSON.parse(content)));
+    return normalizePlan(parsed);
+  }
 }
 
 export async function answerInEnglish(
-  criteria: SearchCriteria,
+  plan: QueryPlan,
   results: string[],
 ): Promise<string> {
   const cerebrasClient = getCerebrasClient();
@@ -275,11 +374,11 @@ export async function answerInEnglish(
 
   const system = [
     "You are given a list of pokemon names along with criteria that they all fulfill.",
-    "Criteria will include 6 lists of types, moves, abilities, as well as exclusions of those.",
-    "For each of these lists that aren't empty, please declare in plain English that the pokemon (capitalized names) that meet these criteria are the list.",
+    "Criteria will be provided as filters over types, moves, and abilities, including exclusions.",
+    "Describe the filters in plain English before listing the Pokemon names.",
     "For example, '<type> Pokemon that know <move_1> and <move_2> and have <ability> are <pokemon_1>, <pokemon_2>, and <pokemon_3>'.",
     "For a single pokemon output, 'The <type> Pokemon that knows <move_1> and <move_2> and has <ability> is <pokemon>'.",
-    "Capitalize the criteria, and make sure to always include them in your output as previously formatted for triaging.",
+    "Capitalize type, move, and ability names in the sentence.",
     "Finally, some pokemon have special names with hyphens.",
     "If the pokemon is a mega pokemon, call it 'Mega <pokemon_name>'.",
     "<pokemon_name>-'mega-x' becomes 'Mega <pokemon_name> X'.",
@@ -303,7 +402,7 @@ export async function answerInEnglish(
       { role: "system", content: system },
       {
         role: "user",
-        content: `Criteria: ${JSON.stringify(criteria)}, Results: ${JSON.stringify(results)}`,
+        content: `Filters: ${JSON.stringify(plan.filters ?? [])}, Results: ${JSON.stringify(results)}`,
       },
     ],
   });

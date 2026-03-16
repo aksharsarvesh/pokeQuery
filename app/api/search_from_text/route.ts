@@ -3,9 +3,8 @@ import { inspect } from "node:util";
 
 import {
   answerInEnglish,
-  buildPlanFromCriteria,
   executeSupabasePlan,
-  extractCriteriaFromText,
+  planFromText,
 } from "@/lib/server/pokemon-search";
 
 export const runtime = "nodejs";
@@ -24,12 +23,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ detail: "Missing query" }, { status: 400 });
     }
 
-    const criteria = await extractCriteriaFromText(query);
-    console.log(
-      "[api/search_from_text] criteria",
-      inspect(criteria, { depth: null, colors: false }),
-    );
-    const plan = buildPlanFromCriteria(criteria);
+    const plan = await planFromText(query);
     console.log(
       "[api/search_from_text] plan",
       inspect(plan, { depth: null, colors: false }),
@@ -46,7 +40,7 @@ export async function POST(request: Request) {
       "[api/search_from_text] results",
       inspect(results, { depth: null, colors: false }),
     );
-    const answer = await answerInEnglish(criteria, results);
+    const answer = await answerInEnglish(plan, results);
     console.log("[api/search_from_text] answer", answer);
 
     return NextResponse.json(answer);
