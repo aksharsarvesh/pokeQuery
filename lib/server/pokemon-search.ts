@@ -283,6 +283,156 @@ function titleCasePokemonTerm(value: string): string {
     .join(" ");
 }
 
+const REGIONAL_FORM_PREFIX: Record<string, string> = {
+  alola: "Alolan",
+  galar: "Galarian",
+  paldea: "Paldean",
+  hisui: "Hisuian",
+};
+
+const SPACE_NORMALIZATION_PATTERN = /[\u202F\u00A0\u2009]/g;
+const MEGA_X_SUFFIX = ["mega", "x"] as const;
+const MEGA_Y_SUFFIX = ["mega", "y"] as const;
+const MEGA_SUFFIX = ["mega"] as const;
+
+type ParsedPokemonName = {
+  displayName: string;
+  speciesStem: string;
+  regionalPrefix: string | null;
+  collapsedDisplayName: string;
+};
+
+type GroupedPokemonResult = {
+  count: number;
+  displayName: string;
+  collapsedDisplayName: string;
+};
+
+type FilterSummary = {
+  positiveTypes: string[];
+  negativeTypes: string[];
+  positiveMoves: string[];
+  negativeMoves: string[];
+  positiveAbilities: string[];
+  negativeAbilities: string[];
+};
+
+function splitPokemonName(rawName: string): string[] {
+  return rawName
+    .trim()
+    .toLowerCase()
+    .split("-")
+    .filter(Boolean);
+}
+
+function isRegionalSuffix(part: string): part is keyof typeof REGIONAL_FORM_PREFIX {
+  return part in REGIONAL_FORM_PREFIX;
+}
+
+function hasTrailingSuffix(parts: string[], suffix: readonly string[]): boolean {
+  if (parts.length < suffix.length) {
+    return false;
+  }
+
+  return suffix.every((part, index) => parts[parts.length - suffix.length + index] === part);
+}
+
+function stripTrailingSuffix(parts: string[], suffix: readonly string[]): string[] {
+  return parts.slice(0, parts.length - suffix.length);
+}
+
+function formatDisplayName(regionalPrefix: string | null, baseName: string, megaPrefix = ""): string {
+  return [regionalPrefix, `${megaPrefix}${baseName}`].filter(Boolean).join(" ");
+}
+
+function extractPokemonNameInfo(rawName: string): ParsedPokemonName {
+  const originalParts = splitPokemonName(rawName);
+  if (originalParts.length === 0) {
+    return {
+      displayName: "",
+      speciesStem: "",
+      regionalPrefix: null,
+      collapsedDisplayName: "",
+    };
+  }
+
+  let parts = [...originalParts];
+  let regionalPrefix: string | null = null;
+
+  const trailingRegion = parts.at(-1);
+  if (trailingRegion && isRegionalSuffix(trailingRegion)) {
+    regionalPrefix = REGIONAL_FORM_PREFIX[trailingRegion];
+    parts = parts.slice(0, -1);
+  }
+
+  let megaPrefix = "";
+  if (hasTrailingSuffix(parts, MEGA_X_SUFFIX)) {
+    megaPrefix = "Mega ";
+    parts = stripTrailingSuffix(parts, MEGA_X_SUFFIX);
+    parts.push("x");
+  } else if (hasTrailingSuffix(parts, MEGA_Y_SUFFIX)) {
+    megaPrefix = "Mega ";
+    parts = stripTrailingSuffix(parts, MEGA_Y_SUFFIX);
+    parts.push("y");
+  } else if (hasTrailingSuffix(parts, MEGA_SUFFIX)) {
+    megaPrefix = "Mega ";
+    parts = stripTrailingSuffix(parts, MEGA_SUFFIX);
+  }
+
+  const displayBase = titleCasePokemonTerm(parts.join(" "));
+  const speciesStem = parts[0] ?? "";
+
+  return {
+    displayName: formatDisplayName(regionalPrefix, displayBase, megaPrefix),
+    speciesStem,
+    regionalPrefix,
+    collapsedDisplayName: formatDisplayName(
+      regionalPrefix,
+      titleCasePokemonTerm(speciesStem),
+    ),
+  };
+}
+
+function dedupePokemonResults(results: string[]): string[] {
+  const grouped = new Map<string, GroupedPokemonResult>();
+  const orderedKeys: string[] = [];
+
+  for (const rawName of results) {
+    const info = extractPokemonNameInfo(rawName);
+    if (!info.displayName || !info.speciesStem) {
+      continue;
+    }
+
+    const groupKey = info.regionalPrefix
+      ? `${info.regionalPrefix}:${info.speciesStem}`
+      : info.speciesStem;
+
+    const existing = grouped.get(groupKey);
+    if (existing) {
+      existing.count += 1;
+      continue;
+    }
+
+    grouped.set(groupKey, {
+      count: 1,
+      displayName: info.displayName,
+      collapsedDisplayName: info.collapsedDisplayName,
+    });
+    orderedKeys.push(groupKey);
+  }
+
+  const deduped: string[] = [];
+  for (const key of orderedKeys) {
+    const group = grouped.get(key);
+    if (!group) {
+      continue;
+    }
+    deduped.push(group.count > 1 ? group.collapsedDisplayName : group.displayName);
+  }
+
+  return deduped;
+}
+
 function joinWithAnd(values: string[]): string {
   if (values.length === 0) {
     return "";
@@ -296,52 +446,92 @@ function joinWithAnd(values: string[]): string {
   return `${values.slice(0, -1).join(", ")}, and ${values.at(-1)}`;
 }
 
-export async function answerInEnglish(
-  plan: QueryPlan,
-  results: string[],
-): Promise<string> {
-  const cerebrasClient = getCerebrasClient();
-  if (!cerebrasClient) {
-    throw new Error("Missing CEREBRAS_API_KEY");
+function summarizeFilters(filters: QueryFilter[]): FilterSummary {
+  const summary: FilterSummary = {
+    positiveTypes: [],
+    negativeTypes: [],
+    positiveMoves: [],
+    negativeMoves: [],
+    positiveAbilities: [],
+    negativeAbilities: [],
+  };
+
+  for (const filter of filters) {
+    const formattedValue = titleCasePokemonTerm(filter.val);
+    if (filter.col === "types" && filter.op === "contains") {
+      summary.positiveTypes.push(formattedValue);
+    } else if (filter.col === "types" && filter.op === "not_contains") {
+      summary.negativeTypes.push(formattedValue);
+    } else if (filter.col === "moves" && filter.op === "contains") {
+      summary.positiveMoves.push(formattedValue);
+    } else if (filter.col === "moves" && filter.op === "not_contains") {
+      summary.negativeMoves.push(formattedValue);
+    } else if (filter.col === "abilities" && filter.op === "contains") {
+      summary.positiveAbilities.push(formattedValue);
+    } else if (filter.col === "abilities" && filter.op === "not_contains") {
+      summary.negativeAbilities.push(formattedValue);
+    }
   }
 
-  const system = [
-    "You are given a list of pokemon names along with criteria that they all fulfill.",
-    "Criteria will be provided as filters over types, moves, and abilities, including exclusions.",
-    "Describe the filters in plain English before listing the Pokemon names.",
-    "For example, '<type> Pokemon that know <move_1> and <move_2> and have <ability> are <pokemon_1>, <pokemon_2>, and <pokemon_3>'.",
-    "For a single pokemon output, 'The <type> Pokemon that knows <move_1> and <move_2> and has <ability> is <pokemon>'.",
-    "Capitalize type, move, and ability names in the sentence.",
-    "Finally, some pokemon have special names with hyphens.",
-    "If the pokemon is a mega pokemon, call it 'Mega <pokemon_name>'.",
-    "<pokemon_name>-'mega-x' becomes 'Mega <pokemon_name> X'.",
-    "<pokemon_name>-'mega-y' becomes 'Mega <pokemon_name> Y'.",
-    "If the pokemon is a regional form, please state the region first as an adjective using these exact mappings:",
-    "<pokemon_name>-'alola' -> Alolan <pokemon_name>.",
-    "<pokemon_name>-'galar' -> Galarian <pokemon_name>.",
-    "<pokemon_name>-'paldea' -> Paldean <pokemon_name>.",
-    "<pokemon_name>-'hisui' -> Hisuian <pokemon_name>.",
-    "The database may return duplicates of the same species in different forms or genders.",
-    "If there are species duplicates that are not regional form differences, include only one copy of the species name and exclude the other form data.",
-    "Regional information should never be excluded.",
-    "If there are multiple names that have the same first word, then those are duplicates. Confirm this does not happen in your output.",
-    "Confirm there are no hyphens and regions come before the species name, but do not add regional or mega information that was not already present.",
-    "Return exactly one sentence and use correct grammar.",
-  ].join(" ");
+  return summary;
+}
 
-  const response = await cerebrasClient.chat.completions.create({
-    model: getCerebrasModel(),
-    messages: [
-      { role: "system", content: system },
-      {
-        role: "user",
-        content: `Filters: ${JSON.stringify(plan.filters ?? [])}, Results: ${JSON.stringify(results)}`,
-      },
-    ],
-  });
+function buildCriteriaClause(filters: QueryFilter[], singular: boolean): string {
+  const {
+    positiveTypes,
+    negativeTypes,
+    positiveMoves,
+    negativeMoves,
+    positiveAbilities,
+    negativeAbilities,
+  } = summarizeFilters(filters);
 
-  return (response.choices[0]?.message?.content ?? "")
-    .replaceAll("\u202F", " ")
-    .replaceAll("\u00A0", " ")
-    .replaceAll("\u2009", " ");
+  const clauses: string[] = [];
+
+  if (positiveTypes.length > 0) {
+    clauses.push(`${joinWithAnd(positiveTypes)} Pokemon`);
+  } else {
+    clauses.push("Pokemon");
+  }
+
+  if (negativeTypes.length > 0) {
+    clauses.push(`that ${singular ? "is" : "are"} not ${joinWithAnd(negativeTypes)}-type`);
+  }
+
+  if (positiveMoves.length > 0) {
+    clauses.push(`that ${singular ? "knows" : "know"} ${joinWithAnd(positiveMoves)}`);
+  }
+
+  if (negativeMoves.length > 0) {
+    clauses.push(`that ${singular ? "does" : "do"} not know ${joinWithAnd(negativeMoves)}`);
+  }
+
+  if (positiveAbilities.length > 0) {
+    clauses.push(`that ${singular ? "has" : "have"} ${joinWithAnd(positiveAbilities)}`);
+  }
+
+  if (negativeAbilities.length > 0) {
+    clauses.push(`that ${singular ? "does" : "do"} not have ${joinWithAnd(negativeAbilities)}`);
+  }
+
+  return clauses.join(" ");
+}
+
+function normalizeAnswerSpacing(value: string): string {
+  return value.replaceAll(SPACE_NORMALIZATION_PATTERN, " ");
+}
+
+export async function answerInEnglish(plan: QueryPlan, results: string[]): Promise<string> {
+  const normalizedResults = dedupePokemonResults(results);
+  if (normalizedResults.length === 0) {
+    const criteria = buildCriteriaClause(plan.filters ?? [], false);
+    return `No ${criteria.toLowerCase()} were found.`;
+  }
+
+  const singular = normalizedResults.length === 1;
+  const criteria = buildCriteriaClause(plan.filters ?? [], singular);
+  const verb = singular ? "is" : "are";
+  const names = joinWithAnd(normalizedResults);
+
+  return normalizeAnswerSpacing(`The ${criteria} ${verb} ${names}.`);
 }
