@@ -1,36 +1,40 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# PokeQuery
 
-## Getting Started
+PokeQuery is a Next.js app that turns plain-English Pokemon search requests into
+structured Supabase queries. The active code path lives in the App Router under
+[`app/`](/Users/asarvesh/Documents/pokeQuery/app) and the shared server logic
+lives in [`lib/server/`](/Users/asarvesh/Documents/pokeQuery/lib/server).
 
-First, run the development server:
+## Development
+
+Install dependencies and start the app:
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+The app expects these environment variables:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- `SUPABASE_URL`
+- `SUPABASE_KEY`
+- `CEREBRAS_API_KEY`
+- `CEREBRAS_MODEL` (optional, defaults to `gpt-oss-120b`)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Request Flow
 
-## Learn More
+1. The UI in [`app/page.tsx`](/Users/asarvesh/Documents/pokeQuery/app/page.tsx)
+   sends a natural-language query to
+   [`app/api/search_from_text/route.ts`](/Users/asarvesh/Documents/pokeQuery/app/api/search_from_text/route.ts).
+2. [`lib/server/pokemon-search.ts`](/Users/asarvesh/Documents/pokeQuery/lib/server/pokemon-search.ts)
+   asks the model for a structured plan, runs the query against Supabase, then
+   formats the final English answer.
+3. [`app/api/search/route.ts`](/Users/asarvesh/Documents/pokeQuery/app/api/search/route.ts)
+   is the lower-level endpoint for executing an already-structured query plan.
 
-To learn more about Next.js, take a look at the following resources:
+## Notes
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- [`backend/main.py`](/Users/asarvesh/Documents/pokeQuery/backend/main.py) is an
+  older backend kept for reference and is not the primary app path.
+- Keep the LLM system prompt text unchanged unless there is an explicit reason
+  to revisit product behavior.

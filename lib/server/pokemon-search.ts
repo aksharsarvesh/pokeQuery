@@ -16,6 +16,10 @@ export type QueryPlan = {
   filters: QueryFilter[];
 };
 
+export type PokemonRow = {
+  name: string | null;
+};
+
 const QueryFilterSchema = z.object({
   col: z.enum(["types", "moves", "abilities"]),
   op: z.enum(["contains", "not_contains"]),
@@ -75,20 +79,32 @@ const CEREBRAS_MODEL_PLAN_RESPONSE_FORMAT = {
   },
 };
 
-const ALLOWED_TABLES = new Set(["pokemon_data"]);
-const ALLOWED_COLUMNS: Record<string, Set<string>> = {
+const ALLOWED_TABLES = new Set<QueryPlan["table"]>(["pokemon_data"]);
+const ALLOWED_COLUMNS: Record<QueryPlan["table"], Set<string>> = {
   pokemon_data: new Set(["name", "types", "moves", "abilities"]),
 };
 const MAX_TYPES = 2;
 const MAX_MOVES = 4;
 const MAX_ABILITIES = 1;
+const FILTER_LIMITS = {
+  types: MAX_TYPES,
+  moves: MAX_MOVES,
+  abilities: MAX_ABILITIES,
+} as const;
+const supabaseClient = createClient(
+  requireEnv("SUPABASE_URL"),
+  requireEnv("SUPABASE_KEY"),
+);
+const cerebrasApiKey = process.env.CEREBRAS_API_KEY;
+const cerebrasClient = cerebrasApiKey
+  ? new OpenAI({
+      baseURL: "https://api.cerebras.ai/v1",
+      apiKey: cerebrasApiKey,
+    })
+  : null;
 
-function getSupabaseClient() {
-  return createClient(requireEnv("SUPABASE_URL"), requireEnv("SUPABASE_KEY"));
-}
-
-function createBaseQuery(table: string, select: string) {
-  return getSupabaseClient().from(table).select(select);
+function createBaseQuery(table: QueryPlan["table"], select: QueryPlan["select"]) {
+  return supabaseClient.from(table).select(select);
 }
 
 type QueryBuilder = ReturnType<typeof createBaseQuery>;
@@ -98,18 +114,10 @@ function getCerebrasModel() {
 }
 
 function getCerebrasClient() {
-  const apiKey = process.env.CEREBRAS_API_KEY;
-  if (!apiKey) {
-    return null;
-  }
-
-  return new OpenAI({
-    baseURL: "https://api.cerebras.ai/v1",
-    apiKey,
-  });
+  return cerebrasClient;
 }
 
-function ensureAllowedColumn(table: string, column: string) {
+function ensureAllowedColumn(table: QueryPlan["table"], column: string) {
   if (!ALLOWED_COLUMNS[table]?.has(column)) {
     throw new Error(`Disallowed column: ${table}.${column}`);
   }
@@ -150,11 +158,6 @@ function normalizeList(value: unknown, maxItems: number): string[] {
 }
 
 function normalizePlan(plan: QueryPlan): QueryPlan {
-  const limitByColumn = {
-    types: MAX_TYPES,
-    moves: MAX_MOVES,
-    abilities: MAX_ABILITIES,
-  } as const;
   const counts = {
     types: 0,
     moves: 0,
@@ -164,9 +167,9 @@ function normalizePlan(plan: QueryPlan): QueryPlan {
   const normalizedFilters: QueryFilter[] = [];
 
   for (const filter of plan.filters) {
-    const values = normalizeList([filter.val], limitByColumn[filter.col]);
+    const values = normalizeList([filter.val], FILTER_LIMITS[filter.col]);
     for (const value of values) {
-      if (counts[filter.col] >= limitByColumn[filter.col]) {
+      if (counts[filter.col] >= FILTER_LIMITS[filter.col]) {
         break;
       }
 
@@ -192,7 +195,7 @@ function normalizePlan(plan: QueryPlan): QueryPlan {
   };
 }
 
-function applyFilter(query: QueryBuilder, table: string, filter: QueryFilter) {
+function applyFilter(query: QueryBuilder, table: QueryPlan["table"], filter: QueryFilter) {
   const { col, op, val } = filter;
   ensureAllowedColumn(table, col);
 
@@ -206,18 +209,16 @@ function applyFilter(query: QueryBuilder, table: string, filter: QueryFilter) {
   }
 }
 
-export async function executeSupabasePlan(plan: QueryPlan): Promise<Record<string, unknown>[]> {
-  plan = QueryPlanSchema.parse(plan);
-  const { table } = plan;
+export async function executeSupabasePlan(plan: QueryPlan): Promise<PokemonRow[]> {
+  const parsedPlan = QueryPlanSchema.parse(plan);
+  const { table, select, filters } = parsedPlan;
   if (!ALLOWED_TABLES.has(table)) {
     throw new Error(`Disallowed table: ${table}`);
   }
 
-  const select = plan.select;
-
   let query = createBaseQuery(table, select);
 
-  for (const filter of plan.filters) {
+  for (const filter of filters) {
     query = applyFilter(query, table, filter);
   }
   const { data, error } = await query;
@@ -225,7 +226,47 @@ export async function executeSupabasePlan(plan: QueryPlan): Promise<Record<strin
     throw new Error(error.message);
   }
 
-  return (data ?? []) as unknown as Record<string, unknown>[];
+  return (data ?? []) as PokemonRow[];
+}
+
+export function extractPokemonNames(rows: PokemonRow[]): string[] {
+  return rows
+    .map((row) => row.name)
+    .filter((name): name is string => typeof name === "string");
+}
+
+export async function searchPokemon(plan: QueryPlan): Promise<string[]> {
+  const rows = await executeSupabasePlan(plan);
+  return extractPokemonNames(rows);
+}
+
+export async function searchPokemonRowsAndNames(plan: QueryPlan): Promise<{
+  rows: PokemonRow[];
+  results: string[];
+}> {
+  const rows = await executeSupabasePlan(plan);
+
+  return {
+    rows,
+    results: extractPokemonNames(rows),
+  };
+}
+
+export async function searchPokemonFromText(query: string): Promise<{
+  answer: string;
+  plan: QueryPlan;
+  rows: PokemonRow[];
+  results: string[];
+}> {
+  const plan = await planFromText(query);
+  const { rows, results } = await searchPokemonRowsAndNames(plan);
+
+  return {
+    answer: await answerInEnglish(plan, results),
+    plan,
+    rows,
+    results,
+  };
 }
 
 export async function planFromText(query: string): Promise<QueryPlan> {
