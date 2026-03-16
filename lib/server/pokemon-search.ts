@@ -253,8 +253,13 @@ export async function searchPokemonFromText(query: string): Promise<{
   plan: QueryPlan;
   results: string[];
 }> {
-  const plan = await planFromText(query);
-  const { results } = await searchPokemonRowsAndNames(plan);
+  let plan = await planFromText(query);
+  let { results } = await searchPokemonRowsAndNames(plan);
+
+  if (results.length === 0) {
+    plan = await planFromText(query);
+    ({ results } = await searchPokemonRowsAndNames(plan));
+  }
 
   return {
     answer: await answerInEnglish(plan, results),
