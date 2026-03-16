@@ -29,11 +29,11 @@ const QueryFilterSchema = z.object({
 const QueryPlanSchema = z.object({
   table: z.literal("pokemon_data"),
   select: z.literal("name"),
-  filters: z.array(QueryFilterSchema).max(7),
+  filters: z.array(QueryFilterSchema).max(20),
 });
 
 const ModelPlanSchema = z.object({
-  filters: z.array(QueryFilterSchema).max(7),
+  filters: z.array(QueryFilterSchema).max(20),
   notes: z.array(z.string()),
 });
 
@@ -83,9 +83,9 @@ const ALLOWED_TABLES = new Set<QueryPlan["table"]>(["pokemon_data"]);
 const ALLOWED_COLUMNS: Record<QueryPlan["table"], Set<string>> = {
   pokemon_data: new Set(["name", "types", "moves", "abilities"]),
 };
-const MAX_TYPES = 2;
-const MAX_MOVES = 4;
-const MAX_ABILITIES = 1;
+const MAX_TYPES = 10;
+const MAX_MOVES = 10;
+const MAX_ABILITIES = 10;
 const FILTER_LIMITS = {
   types: MAX_TYPES,
   moves: MAX_MOVES,
