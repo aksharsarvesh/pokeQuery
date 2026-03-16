@@ -10,10 +10,6 @@ export async function POST(request: Request) {
   try {
     const body = await readJsonBody<{ query?: unknown }>(request);
     const query = typeof body.query === "string" ? body.query.trim() : "";
-    console.log(
-      "[api/search_from_text] raw body",
-      inspect(body, { depth: null, colors: false }),
-    );
     console.log("[api/search_from_text] query", query);
 
     if (!query) {
