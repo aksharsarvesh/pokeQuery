@@ -592,6 +592,9 @@ function normalizeAnswerSpacing(value: string): string {
 
 export async function answerInEnglish(plan: QueryPlan, results: string[]): Promise<string> {
   const normalizedResults = dedupePokemonResults(results);
+  if (normalizedResults.length > 50) {
+    return "There are a lot of Pokemon that meet this criteria, could you please be more specific?";
+  }
   if (normalizedResults.length === 0) {
     const criteria = buildCriteriaClause(plan.filters ?? [], false);
     return `No ${criteria.toLowerCase()} were found.`;
