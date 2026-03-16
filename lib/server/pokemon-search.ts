@@ -591,6 +591,9 @@ function normalizeAnswerSpacing(value: string): string {
 }
 
 export async function answerInEnglish(plan: QueryPlan, results: string[]): Promise<string> {
+  if ((plan.filters ?? []).length === 0) {
+    return "Sorry, I couldn't figure out the criteria you were asking for. I can support moves, abilities, types, or exclusions of any of those.";
+  }
   const normalizedResults = dedupePokemonResults(results);
   if (normalizedResults.length > 50) {
     return "There are a lot of Pokemon that meet this criteria, could you please be more specific?";
