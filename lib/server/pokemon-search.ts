@@ -288,6 +288,7 @@ export async function planFromText(query: string): Promise<QueryPlan> {
     "If a user token appears concatenated, split it into the intended multi-word term.",
     "If a term is ambiguous or uncommon, use your best judgment to map it to the intended canonical Pokemon term.",
     "For example, raindance -> rain dance",
+    "The database is also hard-coded to use spaces over hyphens (e.g. u turn not u-turn)",
     "Also in the notes attribute write down any editing you had to make to the query, how and why.",
     "Do not add extra keys or explanations.",
   ].join(" ");
