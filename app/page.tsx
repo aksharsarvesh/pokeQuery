@@ -86,7 +86,7 @@ export default function Home() {
               type="text"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Example: Non-fire types that can learn flare blitz but not flame thrower"
+              placeholder="Example: Legendary non-fire types that can learn flare blitz"
               className="w-full rounded-2xl border border-foreground/15 bg-background px-4 py-3 outline-none transition focus:border-foreground/35"
             />
             <div className="flex items-center gap-3">
