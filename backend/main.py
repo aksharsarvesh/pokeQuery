@@ -62,7 +62,7 @@ AllowedOp = Literal[
 
 ALLOWED_TABLES = {"pokemon_data"}
 ALLOWED_COLUMNS = {
-    "pokemon_data": {"name", "types", "moves", "abilities"},
+    "pokemon_data": {"name", "is_legendary", "types", "moves", "abilities", "type_resists"},
 }
 MAX_LIMIT = 2000
 MAX_TYPES = 2
@@ -174,12 +174,13 @@ def extract_criteria_from_text(query: str) -> dict:
     system = (
         "You extract search criteria for Pokemon and return only JSON. "
         "Return only JSON with keys "
-        '"types", "moves", "abilities", "exclude_types", "exclude_moves", '
-        '"exclude_abilities", "notes". Values must be arrays of lowercase strings. '
+        '"types", "moves", "abilities", "type_resists", "legendary", "exclude_types", "exclude_moves", '
+        '"exclude_abilities", "exclude_type_resists", "exclude_legendary", "notes". Values must be arrays of lowercase strings. '
         "Do not add any keys outside that schema. "
         "Only include items explicitly requested by the user. "
         "Correct spelling and spacing to canonical move/ability/type names. "
         "Do not copy the terms directly. Confirm each is a real type/move/ability and is spelled and spaced correctly. "
+        'For "legendary" and "exclude_legendary", use ["true"] when the user explicitly asks for legendary Pokemon and ["true"] in exclude_legendary when they explicitly ask for non-legendary Pokemon. '
         "If a user token appears to be concatenated, split it into the intended multi-word term. "
         "If truly ambiguous, or if they are requesting unknown criteria, it may not be in your training data; Use your best judgement for what the user meant. "
         "Also in the notes attribute write down any editing you had to make to the query, how and why."
@@ -200,16 +201,24 @@ def extract_criteria_from_text(query: str) -> dict:
     types = _normalize_list(data.get("types", []), MAX_TYPES)
     moves = _normalize_list(data.get("moves", []), MAX_MOVES)
     abilities = _normalize_list(data.get("abilities", []), MAX_ABILITIES)
+    type_resists = _normalize_list(data.get("type_resists", []), MAX_TYPES)
+    legendary = _normalize_list(data.get("legendary", []), 1)
     exclude_types = _normalize_list(data.get("exclude_types", []), MAX_TYPES)
     exclude_moves = _normalize_list(data.get("exclude_moves", []), MAX_MOVES)
     exclude_abilities = _normalize_list(data.get("exclude_abilities", []), MAX_ABILITIES)
+    exclude_type_resists = _normalize_list(data.get("exclude_type_resists", []), MAX_TYPES)
+    exclude_legendary = _normalize_list(data.get("exclude_legendary", []), 1)
     return {
         "types": types,
         "moves": moves,
         "abilities": abilities,
+        "type_resists": type_resists,
+        "legendary": legendary,
         "exclude_types": exclude_types,
         "exclude_moves": exclude_moves,
         "exclude_abilities": exclude_abilities,
+        "exclude_type_resists": exclude_type_resists,
+        "exclude_legendary": exclude_legendary,
     }
 
 
@@ -222,6 +231,14 @@ def build_plan_from_criteria(criteria: dict) -> dict:
     if criteria.get("abilities"):
         filters.append(
             {"col": "abilities", "op": "contains", "val": criteria["abilities"]}
+        )
+    if criteria.get("type_resists"):
+        filters.append(
+            {"col": "type_resists", "op": "contains", "val": criteria["type_resists"]}
+        )
+    if criteria.get("legendary"):
+        filters.append(
+            {"col": "is_legendary", "op": "eq", "val": criteria["legendary"][0] == "true"}
         )
     if criteria.get("exclude_types"):
         filters.append(
@@ -237,6 +254,22 @@ def build_plan_from_criteria(criteria: dict) -> dict:
                 "col": "abilities",
                 "op": "not_contains",
                 "val": criteria["exclude_abilities"],
+            }
+        )
+    if criteria.get("exclude_type_resists"):
+        filters.append(
+            {
+                "col": "type_resists",
+                "op": "not_contains",
+                "val": criteria["exclude_type_resists"],
+            }
+        )
+    if criteria.get("exclude_legendary"):
+        filters.append(
+            {
+                "col": "is_legendary",
+                "op": "neq",
+                "val": criteria["exclude_legendary"][0] == "true",
             }
         )
     return {

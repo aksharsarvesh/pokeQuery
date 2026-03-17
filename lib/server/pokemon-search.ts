@@ -5,8 +5,8 @@ import { z } from "zod";
 import { requireEnv } from "@/lib/server/env";
 
 export type QueryFilter = {
-  col: "types" | "moves" | "abilities";
-  op: "contains" | "not_contains";
+  col: "types" | "moves" | "abilities" | "type_resists" | "is_legendary";
+  op: "contains" | "not_contains" | "eq" | "neq";
   val: string;
 };
 
@@ -21,8 +21,8 @@ export type PokemonRow = {
 };
 
 const QueryFilterSchema = z.object({
-  col: z.enum(["types", "moves", "abilities"]),
-  op: z.enum(["contains", "not_contains"]),
+  col: z.enum(["types", "moves", "abilities", "type_resists", "is_legendary"]),
+  op: z.enum(["contains", "not_contains", "eq", "neq"]),
   val: z.string(),
 });
 
@@ -54,11 +54,11 @@ const CEREBRAS_MODEL_PLAN_RESPONSE_FORMAT = {
             properties: {
               col: {
                 type: "string",
-                enum: ["types", "moves", "abilities"],
+                enum: ["types", "moves", "abilities", "type_resists", "is_legendary"],
               },
               op: {
                 type: "string",
-                enum: ["contains", "not_contains"],
+                enum: ["contains", "not_contains", "eq", "neq"],
               },
               val: {
                 type: "string",
@@ -80,14 +80,17 @@ const CEREBRAS_MODEL_PLAN_RESPONSE_FORMAT = {
 };
 
 const ALLOWED_TABLES = new Set<QueryPlan["table"]>(["pokemon_data"]);
+const BOOLEAN_FILTER_COLUMNS = new Set(["is_legendary"]);
 const ALLOWED_COLUMNS: Record<QueryPlan["table"], Set<string>> = {
-  pokemon_data: new Set(["name", "types", "moves", "abilities"]),
+  pokemon_data: new Set(["name", "is_legendary", "types", "moves", "abilities", "type_resists"]),
 };
 const UNBOUNDED_FILTERS = Number.POSITIVE_INFINITY;
 const FILTER_LIMITS = {
   types: UNBOUNDED_FILTERS,
   moves: UNBOUNDED_FILTERS,
   abilities: UNBOUNDED_FILTERS,
+  type_resists: UNBOUNDED_FILTERS,
+  is_legendary: 1,
 } as const;
 const supabaseClient = createClient(
   requireEnv("SUPABASE_URL"),
@@ -160,6 +163,8 @@ function normalizePlan(plan: QueryPlan): QueryPlan {
     types: 0,
     moves: 0,
     abilities: 0,
+    type_resists: 0,
+    is_legendary: 0,
   };
   const seen = new Set<string>();
   const normalizedFilters: QueryFilter[] = [];
@@ -202,6 +207,10 @@ function applyFilter(query: QueryBuilder, table: QueryPlan["table"], filter: Que
       return query.contains(col, [val]);
     case "not_contains":
       return query.not(col, "cs", toPostgresTextArrayLiteral([val]));
+    case "eq":
+      return query.eq(col, BOOLEAN_FILTER_COLUMNS.has(col) ? val === "true" : val);
+    case "neq":
+      return query.neq(col, BOOLEAN_FILTER_COLUMNS.has(col) ? val === "true" : val);
     default:
       throw new Error(`Unsupported op: ${op satisfies never}`);
   }
@@ -277,19 +286,20 @@ export async function planFromText(query: string): Promise<QueryPlan> {
   const system = [
     "Convert the user request into a Pokemon query plan and return only JSON.",
     'Return only the keys "filters" and "notes".',
-    'Allowed filter columns: "types", "moves", "abilities".',
-    'Allowed filter operators: "contains", "not_contains".',
-    'Use an empty array for "filters" when there are none.',
+    'Allowed filter columns: "types", "moves", "abilities", "type_resists", "is_legendary".',
+    'Allowed filter operators: "contains", "not_contains", "eq", "neq".',
     "Each filter value must be a canonical lowercase string.",
     "Only include filters explicitly requested by the user.",
     "Do not make up criteria though. If a move or ability is asked for by description rather than name, do not try to figure out the intended move or ability",
     "Correct spelling and spacing to canonical move, ability, and type names.",
     "Do not copy misspelled or malformed terms directly into the output.",
-    "Confirm each extracted term is a real type, move, or ability and is spelled and spaced correctly.",
+    "Confirm each extracted term is a real type, move, ability, or resistance type and is spelled and spaced correctly.",
     "If a user token appears concatenated, split it into the intended multi-word term.",
     "If a term is ambiguous or uncommon, use your best judgment to map it to the intended canonical Pokemon term, only if they were trying to ask for it by name, not description.",
     "For example, raindance -> rain dance",
     "The database is also hard-coded to use spaces over hyphens (e.g. u turn not u-turn)",
+    'Use "eq" and "neq" for the scalar "is_legendary" column, with value "true" for legendary and "false" for non-legendary only when the user is explicitly asking for that property.',
+    'Use "contains" and "not_contains" for the array columns "types", "moves", "abilities", and "type_resists".',
     "Also in the notes attribute write down any editing you had to make to the query, how and why.",
     "Do not add extra keys or explanations.",
   ].join(" ");
@@ -357,6 +367,10 @@ type FilterSummary = {
   negativeMoves: string[];
   positiveAbilities: string[];
   negativeAbilities: string[];
+  positiveTypeResists: string[];
+  negativeTypeResists: string[];
+  positiveLegendary: boolean;
+  negativeLegendary: boolean;
 };
 
 function splitPokemonName(rawName: string): string[] {
@@ -529,6 +543,10 @@ function summarizeFilters(filters: QueryFilter[]): FilterSummary {
     negativeMoves: [],
     positiveAbilities: [],
     negativeAbilities: [],
+    positiveTypeResists: [],
+    negativeTypeResists: [],
+    positiveLegendary: false,
+    negativeLegendary: false,
   };
 
   for (const filter of filters) {
@@ -545,6 +563,14 @@ function summarizeFilters(filters: QueryFilter[]): FilterSummary {
       summary.positiveAbilities.push(formattedValue);
     } else if (filter.col === "abilities" && filter.op === "not_contains") {
       summary.negativeAbilities.push(formattedValue);
+    } else if (filter.col === "type_resists" && filter.op === "contains") {
+      summary.positiveTypeResists.push(formattedValue);
+    } else if (filter.col === "type_resists" && filter.op === "not_contains") {
+      summary.negativeTypeResists.push(formattedValue);
+    } else if (filter.col === "is_legendary" && filter.op === "eq" && filter.val === "true") {
+      summary.positiveLegendary = true;
+    } else if (filter.col === "is_legendary" && filter.op === "neq" && filter.val === "true") {
+      summary.negativeLegendary = true;
     }
   }
 
@@ -559,6 +585,10 @@ function buildCriteriaClause(filters: QueryFilter[], singular: boolean): string 
     negativeMoves,
     positiveAbilities,
     negativeAbilities,
+    positiveTypeResists,
+    negativeTypeResists,
+    positiveLegendary,
+    negativeLegendary,
   } = summarizeFilters(filters);
 
   const clauses: string[] = [];
@@ -589,6 +619,22 @@ function buildCriteriaClause(filters: QueryFilter[], singular: boolean): string 
     clauses.push(`that ${singular ? "does" : "do"} not have ${joinWithAnd(negativeAbilities)}`);
   }
 
+  if (positiveTypeResists.length > 0) {
+    clauses.push(`that ${singular ? "resists" : "resist"} ${joinWithAnd(positiveTypeResists)}`);
+  }
+
+  if (negativeTypeResists.length > 0) {
+    clauses.push(`that ${singular ? "does" : "do"} not resist ${joinWithAnd(negativeTypeResists)}`);
+  }
+
+  if (positiveLegendary) {
+    clauses.push(`that ${singular ? "is" : "are"} legendary`);
+  }
+
+  if (negativeLegendary) {
+    clauses.push(`that ${singular ? "is" : "are"} not legendary`);
+  }
+
   return clauses.join(" ");
 }
 
@@ -598,7 +644,7 @@ function normalizeAnswerSpacing(value: string): string {
 
 export async function answerInEnglish(plan: QueryPlan, results: string[]): Promise<string> {
   if ((plan.filters ?? []).length === 0) {
-    return "Sorry, I couldn't figure out the criteria you were asking for. I can support moves, abilities, types, or exclusions of any of those.";
+    return "Sorry, I couldn't figure out the criteria you were asking for. I can support moves, abilities, types, type resistances, legendary status, or exclusions of those.";
   }
   const normalizedResults = dedupePokemonResults(results);
   if (normalizedResults.length > 50) {
