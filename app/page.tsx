@@ -97,9 +97,6 @@ export default function Home() {
               >
                 {isSubmitting ? "Searching..." : "Search"}
               </button>
-              <p className="text-sm text-foreground/55">
-                Supports types, moves, abilities, and exclusions.
-              </p>
             </div>
           </form>
         </section>
