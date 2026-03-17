@@ -591,51 +591,52 @@ function buildCriteriaClause(filters: QueryFilter[], singular: boolean): string 
     negativeLegendary,
   } = summarizeFilters(filters);
 
-  const clauses: string[] = [];
-
-  if (positiveTypes.length > 0) {
-    clauses.push(`${joinWithAnd(positiveTypes)} Pokemon`);
-  } else {
-    clauses.push("Pokemon");
+  const nounPhraseParts: string[] = [];
+  if (positiveLegendary) {
+    nounPhraseParts.push("Legendary");
+  } else if (negativeLegendary) {
+    nounPhraseParts.push("Non-Legendary");
   }
+  if (positiveTypes.length > 0) {
+    nounPhraseParts.push(joinWithAnd(positiveTypes));
+  }
+  nounPhraseParts.push("Pokemon");
+  const subject = nounPhraseParts.join(" ");
+  const predicates: string[] = [];
 
   if (negativeTypes.length > 0) {
-    clauses.push(`that ${singular ? "is" : "are"} not ${joinWithAnd(negativeTypes)}-type`);
+    predicates.push(`${singular ? "is" : "are"} not ${joinWithAnd(negativeTypes)}-type`);
   }
 
   if (positiveMoves.length > 0) {
-    clauses.push(`that ${singular ? "knows" : "know"} ${joinWithAnd(positiveMoves)}`);
+    predicates.push(`${singular ? "knows" : "know"} ${joinWithAnd(positiveMoves)}`);
   }
 
   if (negativeMoves.length > 0) {
-    clauses.push(`that ${singular ? "does" : "do"} not know ${joinWithAnd(negativeMoves)}`);
+    predicates.push(`${singular ? "does" : "do"} not know ${joinWithAnd(negativeMoves)}`);
   }
 
   if (positiveAbilities.length > 0) {
-    clauses.push(`that ${singular ? "has" : "have"} ${joinWithAnd(positiveAbilities)}`);
+    predicates.push(`${singular ? "has" : "have"} ${joinWithAnd(positiveAbilities)}`);
   }
 
   if (negativeAbilities.length > 0) {
-    clauses.push(`that ${singular ? "does" : "do"} not have ${joinWithAnd(negativeAbilities)}`);
+    predicates.push(`${singular ? "does" : "do"} not have ${joinWithAnd(negativeAbilities)}`);
   }
 
   if (positiveTypeResists.length > 0) {
-    clauses.push(`that ${singular ? "resists" : "resist"} ${joinWithAnd(positiveTypeResists)}`);
+    predicates.push(`${singular ? "resists" : "resist"} ${joinWithAnd(positiveTypeResists)}`);
   }
 
   if (negativeTypeResists.length > 0) {
-    clauses.push(`that ${singular ? "does" : "do"} not resist ${joinWithAnd(negativeTypeResists)}`);
+    predicates.push(`${singular ? "does" : "do"} not resist ${joinWithAnd(negativeTypeResists)}`);
   }
 
-  if (positiveLegendary) {
-    clauses.push(`that ${singular ? "is" : "are"} legendary`);
+  if (predicates.length === 0) {
+    return subject;
   }
 
-  if (negativeLegendary) {
-    clauses.push(`that ${singular ? "is" : "are"} not legendary`);
-  }
-
-  return clauses.join(" ");
+  return `${subject} that ${joinWithAnd(predicates)}`;
 }
 
 function normalizeAnswerSpacing(value: string): string {
