@@ -10,7 +10,7 @@ export async function POST(request: Request) {
   try {
     const body = await readJsonBody<{ query?: unknown }>(request);
     const query = typeof body.query === "string" ? body.query.trim() : "";
-    console.log("[api/search_from_text] query", query);
+    console.log("[api/search_from_text]", query);
 
     if (!query) {
       return NextResponse.json({ detail: "Missing query" }, { status: 400 });
