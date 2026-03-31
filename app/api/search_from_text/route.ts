@@ -18,10 +18,6 @@ export async function POST(request: Request) {
 
     const { answer, plan, results } = await searchPokemonFromText(query);
     console.log(
-      "[api/search_from_text] plan",
-      inspect(plan, { depth: null, colors: false }),
-    );
-    console.log(
       "[api/search_from_text] results",
       inspect(results, { depth: null, colors: false }),
     );

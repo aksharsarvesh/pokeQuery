@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
 
 import { requireEnv } from "@/lib/server/env";
+import { inspect } from "node:util";
 
 export type QueryFilter = {
   col: "types" | "moves" | "abilities" | "type_resists" | "is_legendary";
@@ -35,6 +36,10 @@ const QueryPlanSchema = z.object({
 const ModelPlanSchema = z.object({
   filters: z.array(QueryFilterSchema),
   notes: z.array(z.string()),
+});
+
+const CanonicalizedPlanSchema = z.object({
+  filters: z.array(QueryFilterSchema),
 });
 
 const CEREBRAS_MODEL_PLAN_RESPONSE_FORMAT = {
@@ -198,6 +203,115 @@ function normalizePlan(plan: QueryPlan): QueryPlan {
   };
 }
 
+function hasPlanShapeMismatch(original: QueryPlan, candidate: QueryPlan): boolean {
+  if (original.filters.length !== candidate.filters.length) {
+    return true;
+  }
+
+  return original.filters.some((filter, index) => {
+    const candidateFilter = candidate.filters[index];
+    return !candidateFilter || filter.col !== candidateFilter.col || filter.op !== candidateFilter.op;
+  });
+}
+
+async function canonicalizePlan(plan: QueryPlan): Promise<QueryPlan> {
+  if (plan.filters.length === 0) {
+    return plan;
+  }
+
+  const cerebrasClient = getCerebrasClient();
+  if (!cerebrasClient) {
+    return plan;
+  }
+
+  try {
+    const system = [
+      "Canonicalize the filter values in this Pokemon query plan and return only JSON.",
+      'Return only the key "filters".',
+      "Keep the same filters in the same order.",
+      'Do not add, remove, reorder, or merge filters.',
+      'Do not change "col" or "op".',
+      "Only correct malformed Pokemon terms in each filter value.",
+      "Fix spelling, spacing, or canonical formatting for real Pokemon moves, abilities, types, and resistance types.",
+      "For example, correct malformed terms like flame thrower to flamethrower and u-turn to u turn if needed.",
+      "Do not reinterpret descriptive phrases as guessed move or ability names.",
+      "If a value is already canonical, keep it unchanged.",
+      "If you are uncertain, keep the original value unchanged.",
+      "Do not add explanations.",
+    ].join(" ");
+    const response = await cerebrasClient.chat.completions.create({
+      model: getCerebrasModel(),
+      messages: [
+        { role: "system", content: system },
+        {
+          role: "user",
+          content: JSON.stringify({
+            filters: plan.filters,
+          }),
+        },
+      ],
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "pokemon_canonicalized_plan",
+          strict: true,
+          schema: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              filters: {
+                type: "array",
+                items: {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {
+                    col: {
+                      type: "string",
+                      enum: ["types", "moves", "abilities", "type_resists", "is_legendary"],
+                    },
+                    op: {
+                      type: "string",
+                      enum: ["contains", "not_contains", "eq", "neq"],
+                    },
+                    val: {
+                      type: "string",
+                    },
+                  },
+                  required: ["col", "op", "val"],
+                },
+              },
+            },
+            required: ["filters"],
+          },
+        },
+      },
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) {
+      return plan;
+    }
+
+    const parsed = CanonicalizedPlanSchema.parse(JSON.parse(content));
+    const canonicalizedPlan = normalizePlan({
+      table: plan.table,
+      select: plan.select,
+      filters: parsed.filters,
+    });
+
+    if (hasPlanShapeMismatch(plan, canonicalizedPlan)) {
+      console.warn("[canonicalizePlan] rejected plan shape mismatch");
+      return plan;
+    }
+
+    console.log("[canonicalizePlan] after", canonicalizedPlan.filters);
+    return canonicalizedPlan;
+  } catch (error) {
+    console.warn("[canonicalizePlan] failed", error);
+    return plan;
+  }
+}
+
 function applyFilter(query: QueryBuilder, table: QueryPlan["table"], filter: QueryFilter) {
   const { col, op, val } = filter;
   ensureAllowedColumn(table, col);
@@ -263,10 +377,14 @@ export async function searchPokemonFromText(query: string): Promise<{
   results: string[];
 }> {
   let plan = await planFromText(query);
+  console.log("[plan] before", plan.filters);
+  plan = await canonicalizePlan(plan);
   let { results } = await searchPokemonRowsAndNames(plan);
 
   if (results.length === 0) {
     plan = await planFromText(query);
+    
+    plan = await canonicalizePlan(plan);
     ({ results } = await searchPokemonRowsAndNames(plan));
   }
 
