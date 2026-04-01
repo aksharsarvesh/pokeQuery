@@ -23,6 +23,7 @@
 # misc
 .DS_Store
 *.pem
+.codex/
 backend/__pycache__/*
 *.pyc
 
